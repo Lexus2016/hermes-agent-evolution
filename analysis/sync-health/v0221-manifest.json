@@ -11514,6 +11514,449 @@
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
         }
       ]
+    },
+    {
+      "id": "cli-failure-boundary-01",
+      "status": "reviewed",
+      "path": "hermes_cli/config.py",
+      "scope": "_inject_platform_plugin_env_vars",
+      "rule": "S110",
+      "detail": "try/except/pass",
+      "code": "except Exception:",
+      "candidate_blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/config.py",
+        "scope": "_inject_platform_plugin_env_vars",
+        "blob": "9a13eb8332285d00cc96fe52d43d5578172763f0",
+        "unit_body_hash": "e016783eb36b9c62"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Metadata-only discovery tolerates malformed plugin trees so importing CLI remains possible. Credential policy uses separate strict platform_manifest_secret_scan with completeness flag retaining known denials, rather than this best-effort registry. User/nested metadata regression passed1. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "config.platform_manifest_secret_scan; config._platform_plugin_manifests(strict=True); platform_manifest_secret_envs",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_metadata_discovery_failure_retains_profile_secret_denial"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tools/environments/local_env_policy.py",
+          "blob": "1997c7e268f963dea41a2870f496d5a7f3d62e3e",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-02",
+      "status": "reviewed",
+      "path": "hermes_cli/config.py",
+      "scope": "_inject_platform_plugin_env_vars",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/config.py",
+        "scope": "_inject_platform_plugin_env_vars",
+        "blob": "9a13eb8332285d00cc96fe52d43d5578172763f0",
+        "unit_body_hash": "e016783eb36b9c62"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Metadata-only discovery tolerates malformed plugin trees so importing CLI remains possible. Credential policy uses separate strict platform_manifest_secret_scan with completeness flag retaining known denials, rather than this best-effort registry. User/nested metadata regression passed1. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "config.platform_manifest_secret_scan; config._platform_plugin_manifests(strict=True); platform_manifest_secret_envs",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_metadata_discovery_failure_retains_profile_secret_denial"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tools/environments/local_env_policy.py",
+          "blob": "1997c7e268f963dea41a2870f496d5a7f3d62e3e",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-03",
+      "status": "reviewed",
+      "path": "hermes_cli/doctor_config.py",
+      "scope": "_check_relay_plugins",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "cedcba501414fc0bb42ec04d3ab1bec3fa8b2d9e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/doctor_config.py",
+        "scope": "_check_relay_plugins",
+        "blob": "cedcba501414fc0bb42ec04d3ab1bec3fa8b2d9e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Exception becomes visible check_warn, cause information and manual_issues entry; not a successful diagnostic. Relay diagnostic suite2passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "doctor check_warn/manual_issues reporting",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_relay_configuration_exception_reports_manual_issue"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "agent/relay_runtime.py",
+          "blob": "f1a841f1c9e014effb48ed92eb67c35389082de3",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_cli/doctor_report.py",
+          "blob": "aa3c961dc9972f8f413335703df64012694ace88",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-04",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host.py",
+      "scope": "PluginHost.shutdown",
+      "rule": "S110",
+      "detail": "try/except/pass",
+      "code": "except Exception:",
+      "candidate_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host.py",
+        "scope": "PluginHost.shutdown",
+        "blob": "b0cd37ee545e24e88af210996590960913b60938"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Failed shutdown RPC is followed by channel.close and bounded process wait, then kill and bounded wait. Does not abandon cleanup at the swallowed error. Host crash/restart/unload suite7passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "Channel.call timeout; Channel.close; Popen.wait/kill",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_failed_shutdown_rpc_still_closes_and_reaps"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-05",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host.py",
+      "scope": "PluginHost.shutdown",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host.py",
+        "scope": "PluginHost.shutdown",
+        "blob": "b0cd37ee545e24e88af210996590960913b60938"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Failed shutdown RPC is followed by channel.close and bounded process wait, then kill and bounded wait. Does not abandon cleanup at the swallowed error. Host crash/restart/unload suite7passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "Channel.call timeout; Channel.close; Popen.wait/kill",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_failed_shutdown_rpc_still_closes_and_reaps"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-06",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "HostRuntime.op_unload",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host_child.py",
+        "scope": "HostRuntime.op_unload",
+        "blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Collects each callback error while continuing reverse callbacks, removes refs/owners/module tree, returns errors. Parent PluginHost._unload logs each returned error. Host7pass exercises unload but not every callback failure. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "PluginHost._unload error logging; refs/owners/modules ownership stores",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_unload_callback_failure_keeps_cleanup_and_visible_error"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-07",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "extract_profiles_main",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host_child.py",
+        "scope": "extract_profiles_main",
+        "blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "One-shot worker converts exception into structured error payload. load_hosted_profiles rejects error with PluginHostUnavailable; does not return successful empty profiles. Parent extraction has60-second timeout and credential-minimal env. Hosted model-profile test passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "plugin_host_profiles._extract timeout and credential-minimal env; load_hosted_profiles error rejection",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_profile_extraction_failure_is_rejected_by_parent"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_host_profiles.py",
+          "blob": "16df810ec840f10d5071deedee2050913c04dccc",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-08",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host_wire.py",
+      "scope": "Channel._serve.run",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except BaseException as exc:",
+      "candidate_blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host_wire.py",
+        "scope": "Channel._serve.run",
+        "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Converts arbitrary plugin exception into explicit remote type/message reply; _SERVING context always reset in finally. Parent result_of raises_remote. Preserves process and caller context rather than pretending success; host crash/session suites passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "context_for_origin; _SERVING.reset finally; Channel.result_of/raise_remote",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_rpc_error_envelope_restores_caller_context"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_cli/plugin_host_child.py",
+          "blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
+    },
+    {
+      "id": "cli-failure-boundary-09",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_validate_locales.py",
+      "scope": "_check_locale_file",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "38584f77fc92f74c4fffb36cf9f6e9467f0ce1bd",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_validate_locales.py",
+        "scope": "_check_locale_file",
+        "blob": "38584f77fc92f74c4fffb36cf9f6e9467f0ce1bd"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller source/failure-test review; exact generated identities pending review",
+        "compatibility": "Parse exception becomes explicit failed report entry and returns; preserves validation failure instead of swallowing it. Locale validation5passed. Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved.",
+        "module_bindings": "validation report.add false; locale parsing facade",
+        "receipt": "/tmp/hermes-plugin-boundary-final.log:24 passed, five files; exact failure test test_locale_parser_exception_fails_validation"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+          "blob": "9f74adced4086ce4b636df43c0d26bd4997cdbb8",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical24-pass receipt and exact failure-branch review; does not cover unrelated exception groups."
+        },
+        {
+          "path": "hermes_cli/plugin_validate.py",
+          "blob": "a7c689c97ceb20d3b315e8ab8d59859ab95f876e",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "hermes_yaml.py",
+          "blob": "4cd43d3cbda1f22974c29fc59dbabef50455f892",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+          "outcome": "passed",
+          "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
+        }
+      ]
     }
   ]
 }
