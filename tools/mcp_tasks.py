@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -41,6 +42,15 @@ _TERMINAL_STATUSES = {
     "cancelled",
     "canceled",
 }
+
+#: Consecutive poll failures tolerated before the loop gives up (#3499). Bounded so a
+#: non-transient failure stops the loop instead of re-issuing the same request every
+#: ``poll_interval`` for the whole window (598 identical warnings in one window).
+_POLL_MAX_CONSECUTIVE_ERRORS = 5
+
+#: Fraction of the shared exponential backoff added/removed as jitter, so a fleet of
+#: pollers that fail together does not re-issue in lockstep.
+_POLL_JITTER_RATIO = 0.25
 
 
 @dataclass
@@ -246,6 +256,32 @@ async def cancel_task(session: Any, task_id: str, reason: str = "") -> bool:
         return False
 
 
+def _is_non_retryable_poll_error(exc: BaseException) -> bool:
+    """True for a poll failure that cannot be fixed by re-issuing the same request (#3499).
+
+    A response-shape mismatch - a plain ``dict`` returned where a model object is
+    expected, or a server that does not implement ``tasks/get`` at all - raises the
+    same ``AttributeError`` / ``NotImplementedError`` / ``TypeError`` on every
+    attempt. Those are surfaced once per task instead of being retried.
+    """
+    return isinstance(exc, (AttributeError, NotImplementedError, TypeError))
+
+
+def _poll_backoff_delay(consecutive_errors: int) -> float:
+    """Delay before retry N of a failing poll: shared exponential backoff + jitter.
+
+    Reuses the same retry policy as core tool calls
+    (:func:`tools.recovery_strategy_dispatcher.backoff_seconds_for`: 1s, 2s, 4s, ...,
+    capped) so the poll path does not grow a second, divergent policy. The jitter is
+    bounded to +/- ``_POLL_JITTER_RATIO``; successive bands never overlap, so the
+    delay is still strictly increasing in ``consecutive_errors``.
+    """
+    from tools.recovery_strategy_dispatcher import backoff_seconds_for
+
+    base = backoff_seconds_for(max(0, int(consecutive_errors) - 1))
+    return base * (1.0 + random.uniform(-_POLL_JITTER_RATIO, _POLL_JITTER_RATIO))
+
+
 async def poll_task_to_completion(
     session: Any,
     task_id: str,
@@ -253,26 +289,65 @@ async def poll_task_to_completion(
     poll_interval: float = 0.5,
     max_wait_sec: float = 300.0,
     on_progress: Optional[Callable[[MCPTask], None]] = None,
+    max_consecutive_errors: int = _POLL_MAX_CONSECUTIVE_ERRORS,
 ) -> MCPTask:
     """Poll tasks/get until the task terminates, then retrieve and attach its final result.
 
     Handles cancellation, timeouts, and errors according to the MCP 2026-07-28 spec.
+
+    A failing poll is retried with the shared exponential-backoff policy
+    (:func:`_poll_backoff_delay`) and bounded by *max_consecutive_errors*. The first
+    failure in a streak is logged once, a non-retryable shape error stops the loop
+    immediately, and a streak that reaches the cap returns a failed task - so a
+    permanently erroring task is never re-issued every ``poll_interval`` for the whole
+    window (issue #3499: 598 identical warnings at ~500 ms in one window).
     """
     start_time = time.time()
+    consecutive_errors = 0
 
     while True:
         try:
             task = await get_task(session, task_id, server_name=server_name)
         except Exception as exc:
-            logger.warning(
-                "Error polling task %s on server %s: %s", task_id, server_name, exc
+            consecutive_errors += 1
+            non_retryable = _is_non_retryable_poll_error(exc)
+            if non_retryable or consecutive_errors >= max_consecutive_errors:
+                logger.warning(
+                    "Giving up polling task %s on server %s after %d consecutive "
+                    "error(s)%s: %s",
+                    task_id,
+                    server_name,
+                    consecutive_errors,
+                    " (non-retryable response shape)"
+                    if non_retryable
+                    else " (attempt cap reached)",
+                    exc,
+                )
+                return MCPTask(
+                    task_id=task_id,
+                    status="failed",
+                    server_name=server_name,
+                    message=str(exc),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            if consecutive_errors == 1:
+                logger.warning(
+                    "Error polling task %s on server %s; retrying with backoff "
+                    "(cap %d consecutive attempts): %s",
+                    task_id,
+                    server_name,
+                    max_consecutive_errors,
+                    exc,
+                )
+            # Never sleep past the poll deadline: an error streak must not overshoot it.
+            remaining = max_wait_sec - (time.time() - start_time)
+            await asyncio.sleep(
+                max(0.0, min(_poll_backoff_delay(consecutive_errors), remaining))
             )
-            task = MCPTask(
-                task_id=task_id,
-                status="working",
-                server_name=server_name,
-                message=str(exc),
-            )
+            continue
+
+        # A healthy poll clears the streak so a late failure gets a fresh budget.
+        consecutive_errors = 0
 
         if on_progress:
             try:

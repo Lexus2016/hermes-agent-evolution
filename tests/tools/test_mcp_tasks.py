@@ -159,6 +159,113 @@ def test_poll_task_to_completion() -> None:
     asyncio.run(_run())
 
 
+def test_poll_loop_backs_off_and_gives_up_on_permanent_error(caplog) -> None:
+    """#3499: a permanently erroring poll is bounded and logged once, not every 500 ms."""
+
+    async def _run():
+        session = AsyncMock()
+        attempts = {"n": 0}
+
+        async def always_fail(req, *args, **kwargs):
+            attempts["n"] += 1
+            raise RuntimeError("transport hiccup")
+
+        session.send_request = always_fail
+
+        delays: List[float] = []
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(delay: float) -> None:
+            delays.append(delay)
+            await real_sleep(0)
+
+        with patch("tools.mcp_tasks.asyncio.sleep", new=fake_sleep):
+            task = await poll_task_to_completion(
+                session,
+                "task_err",
+                server_name="test_srv",
+                max_consecutive_errors=5,
+            )
+
+        assert attempts["n"] == 5, f"expected 5 bounded attempts, got {attempts['n']}"
+        assert task.is_terminal and not task.is_successful
+        assert "transport hiccup" in (task.error or "")
+        # 4 backoff sleeps before giving up, strictly increasing, inside the
+        # shared 1s/2s/4s/8s policy bands (+/-25% jitter).
+        assert len(delays) == 4
+        for index, delay in enumerate(delays):
+            assert 0.75 * 2**index <= delay <= 1.25 * 2**index, delays
+        assert delays == sorted(delays)
+
+    with caplog.at_level("WARNING", logger="tools.mcp_tasks"):
+        asyncio.run(_run())
+
+    poll_lines = [
+        r.getMessage() for r in caplog.records if "task_err" in r.getMessage()
+    ]
+    # One "retrying with backoff" line + one "giving up" line - not one per attempt.
+    assert len(poll_lines) == 2, poll_lines
+
+
+def test_poll_loop_stops_immediately_on_non_retryable_shape_error(caplog) -> None:
+    """#3499: a response-shape mismatch is surfaced once instead of retried 598 times."""
+
+    async def _run():
+        session = AsyncMock()
+        attempts = {"n": 0}
+
+        async def shape_mismatch(req, *args, **kwargs):
+            attempts["n"] += 1
+            raise AttributeError("'dict' object has no attribute 'model_dump'")
+
+        session.send_request = shape_mismatch
+
+        with patch("tools.mcp_tasks.asyncio.sleep", new=AsyncMock()):
+            task = await poll_task_to_completion(
+                session,
+                "task_shape",
+                server_name="brontir-research",
+            )
+
+        assert attempts["n"] == 1, "a non-retryable poll error must not be re-issued"
+        assert not task.is_successful
+        assert task.status == "failed"
+        assert "model_dump" in (task.error or "")
+
+    with caplog.at_level("WARNING", logger="tools.mcp_tasks"):
+        asyncio.run(_run())
+
+    assert sum("task_shape" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_poll_loop_recovers_after_transient_error() -> None:
+    """#3499: a transient poll failure is retried and the streak resets on success."""
+
+    async def _run():
+        session = AsyncMock()
+        attempts = {"n": 0}
+
+        async def flaky(req, *a, **kw):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise RuntimeError("transient blip")
+            return {"task": {"taskId": "task_t", "status": "completed", "result": "ok"}}
+
+        session.send_request = flaky
+
+        with patch("tools.mcp_tasks.asyncio.sleep", new=AsyncMock()):
+            task = await poll_task_to_completion(
+                session,
+                "task_t",
+                server_name="test_srv",
+            )
+
+        assert attempts["n"] == 2
+        assert task.is_successful and task.result == "ok"
+
+    asyncio.run(_run())
+
+
 def test_mcp_task_manager() -> None:
     async def _run():
         manager = MCPTaskManager()
