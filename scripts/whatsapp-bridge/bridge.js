@@ -39,6 +39,7 @@ import {
   createReconnectScheduler,
   createVersionResolver,
   createExponentialBackoff,
+  installConsoleStamps,
   buildLocationPayload,
   buildTextSendPayload,
   createBoundedMessageStore,
@@ -51,7 +52,11 @@ import {
   normalizeWhatsAppId,
   pollCreationMessageFromPayload,
   pollUpdateForAggregation,
+  writeJsonLine,
 } from './bridge_helpers.js';
+
+// First statement: helpers capture console.log as a default at call time below.
+installConsoleStamps();
 
 // Issue #118: Baileys 7 requires global webcrypto, which Node only ships
 // from v20. On older runtimes every startSocket() attempt crash-loops with
@@ -239,7 +244,7 @@ function redactWhatsAppId(value) {
 function emitDebugEvent(payload) {
   if (!WHATSAPP_DEBUG) return;
   try {
-    console.log(JSON.stringify({ event: 'debug', ...payload }));
+    writeJsonLine({ event: 'debug', ...payload });
   } catch {}
 }
 
@@ -308,7 +313,7 @@ function pollAggregationSummary(aggregation) {
 function logPollUpdateDiagnostic({ sourcePath, pollId, pollCreation, pollUpdates, selectedOptions, aggregation }) {
   const firstUpdate = pollUpdates?.[0] || {};
   try {
-    console.log(JSON.stringify({
+    writeJsonLine({
       event: 'poll_update_decode',
       sourcePath,
       pollId: pollId || '',
@@ -317,7 +322,7 @@ function logPollUpdateDiagnostic({ sourcePath, pollId, pollCreation, pollUpdates
       hasVote: !!firstUpdate.vote,
       selectedOptionsLength: selectedOptions?.length || 0,
       aggregation: pollAggregationSummary(aggregation),
-    }));
+    });
   } catch {}
 }
 
@@ -337,7 +342,7 @@ function enqueuePollUpdateEvent({ key, update, selectedOptions, aggregation }) {
   // inject agent-visible messages on every vote.
   if (!pollId || !recentlySentIds.has(pollId)) {
     if (WHATSAPP_DEBUG) {
-      try { console.log(JSON.stringify({ event: 'ignored', reason: 'foreign_poll_update', pollId })); } catch {}
+      try { writeJsonLine({ event: 'ignored', reason: 'foreign_poll_update', pollId }); } catch {}
     }
     return;
   }
@@ -391,7 +396,7 @@ let connectionState = 'disconnected';
 function emitPairEvent(event) {
   if (!PAIR_JSON) return;
   try {
-    console.log(JSON.stringify({ ts: Date.now(), ...event }));
+    writeJsonLine({ ts: Date.now(), ...event });
   } catch {}
 }
 
@@ -432,7 +437,8 @@ async function startSocket() {
         emitPairEvent({ event: 'qr', qr });
       } else {
         console.log('\n📱 Scan this QR code with WhatsApp on your phone:\n');
-        qrcode.generate(qr, { small: true });
+        // The QR block is multi-line art; a stamp on its first row would skew it.
+        qrcode.generate(qr, { small: true }, (code) => process.stdout.write(`${code}\n`));
         console.log('\nWaiting for scan...\n');
       }
     }
@@ -618,12 +624,12 @@ async function startSocket() {
           if (decision.action === 'drop_disabled') continue;
           if (decision.action === 'drop_allowlist') {
             try {
-              console.log(JSON.stringify({
+              writeJsonLine({
                 event: 'ignored',
                 reason: 'allowlist_mismatch_owner_chat',
                 chatId,
                 senderId,
-              }));
+              });
             } catch {}
             continue;
           }
@@ -664,12 +670,12 @@ async function startSocket() {
       if (!msg.key.fromMe) {
         if (WHATSAPP_MODE === 'self-chat') {
           try {
-            console.log(JSON.stringify({
+            writeJsonLine({
               event: 'ignored',
               reason: 'self_chat_mode_rejects_non_self',
               chatId,
               senderId,
-            }));
+            });
           } catch {}
           continue;
         }
@@ -684,13 +690,13 @@ async function startSocket() {
             || matchesAllowedSender(senderId, senderAltId, ALLOWED_USERS, SESSION_DIR);
         if (!intakeAllowed) {
           try {
-            console.log(JSON.stringify({
+            writeJsonLine({
               event: 'ignored',
               reason: isGroup ? 'group_policy_rejected' : 'allowlist_mismatch',
               chatId,
               senderId,
               senderAltId,
-            }));
+            });
           } catch {}
           continue;
         }
@@ -1162,6 +1168,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     scriptHash: SCRIPT_HASH,
     sendReadReceipts: SEND_READ_RECEIPTS,
+    // path.resolve, not realpath: the adapter compares against os.path.abspath, which keeps symlinks.
+    session: path.resolve(SESSION_DIR),
     capabilities: { outboundMentions: true },
   });
 });

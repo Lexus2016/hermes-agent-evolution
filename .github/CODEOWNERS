@@ -13,6 +13,10 @@
 /scripts/register_evolution_cron.py @Lexus2016
 /upgrade.sh                        @Lexus2016
 /setup-hermes.sh                   @Lexus2016
+/scripts/install.sh                @Lexus2016
+/scripts/install.ps1               @Lexus2016
+/scripts/install.cmd               @Lexus2016
+/scripts/gen-bootstrap-pins.py     @Lexus2016
 
 # Scheduler / cron core
 /cron/jobs.py                      @Lexus2016
@@ -20,6 +24,38 @@
 
 # CI and repo automation (the gate itself)
 /.github/                          @Lexus2016
+/scripts/ci/                       @Lexus2016
+/scripts/check                     @Lexus2016
+/scripts/code_health/              @Lexus2016
 
 # The evolution skills that decide what gets implemented/merged
 /skills/evolution/                 @Lexus2016
+
+# Prompt surface and configs
+/tests/fixtures/prompt_surface/    @Lexus2016
+eslint.config.*                    @Lexus2016
+/.prettierrc                       @Lexus2016
+
+# MCP catalog entries and plugins
+/optional-mcps/                    @Lexus2016
+/hermes_cli/mcp_catalog.py         @Lexus2016
+/plugin-catalog/                   @Lexus2016
+
+# Python startup and packaging
+/setup.py                          @Lexus2016
+/setup.cfg                         @Lexus2016
+/sitecustomize.py                  @Lexus2016
+/usercustomize.py                  @Lexus2016
+*.pth                              @Lexus2016
+
+# Dependency manifests and lockfiles
+pyproject.toml                     @Lexus2016
+package.json                       @Lexus2016
+uv.lock                            @Lexus2016
+*package-lock.json                 @Lexus2016
+/flake.lock                        @Lexus2016
+/pm/lock.json                      @Lexus2016
+*Dockerfile                        @Lexus2016
+.npmrc                             @Lexus2016
+/pm/artifact-mirror.json           @Lexus2016
+/SECURITY.md                       @Lexus2016

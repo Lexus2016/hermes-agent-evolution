@@ -57,7 +57,6 @@ def get_provider_env(name: str) -> str:
 def _secret_scope_state() -> tuple[bool, bool]:
     try:
         from agent.secret_scope import current_secret_scope, is_multiplex_active
-
         return current_secret_scope() is not None, is_multiplex_active()
     except Exception:
         # Unknown scope state cannot authorize reading the launch profile's env.
@@ -89,24 +88,16 @@ class WebSearchProvider(ProviderBase):
         the dispatcher awaits coroutine functions)."""
         return False
 
-    def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
+    def search(self, query: str, limit: int = 5) -> dict[str, Any]:
         """Execute a web search. Callers gate on :meth:`supports_search`."""
         raise NotImplementedError(
             f"{self.name} does not support search (override supports_search)"
         )
 
-    def extract(self, urls: List[str], **kwargs: Any) -> Any:
+    def extract(self, urls: list[str], **kwargs: Any) -> Any:
         """Extract content from URLs (callers gate on :meth:`supports_extract`); may be ``async def``.
         Returns ``[{"url", "title", "content", "raw_content", "metadata"?, "error"?}, ...]`` (``error``
         only on per-URL failure). Ignore unknown ``kwargs`` (``format``, ``include_raw``, ``max_chars``)."""
         raise NotImplementedError(
             f"{self.name} does not support extract (override supports_extract)"
         )
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-from typing import Optional  # noqa: F401,E402
-# ---- END PLUGIN-COMPAT ----

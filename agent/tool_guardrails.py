@@ -210,9 +210,30 @@ PROGRESS_RESET_TOOL_NAMES = frozenset(
 
 def is_stall_guard_repeatable(tool_name: str) -> bool:
     """Whether a tool is exempt from the identical-call loop notice."""
-    if tool_name in STALL_GUARD_REPEATABLE_TOOLS:
-        return True
-    return tool_name.endswith(_STALL_GUARD_REPEATABLE_SUFFIXES)
+    return tool_name in STALL_GUARD_REPEATABLE_TOOLS or tool_name.endswith(_STALL_GUARD_REPEATABLE_SUFFIXES)
+
+
+def _is_non_interactive_platform(platform: str | None) -> bool:
+    """True for gateway/cron sessions where tool loops are unattended."""
+    if not isinstance(platform, str) or not platform.strip():
+        return False
+    return platform.strip().lower() not in _ATTENDED_PLATFORMS
+
+
+@dataclass(frozen=True)
+class LoopCapConfig:
+    """Per-turn hard ceilings on web_search calls / subagent spawns; count total calls (not
+    repeats), fire regardless of ``hard_stop_enabled``; ``0`` disables a cap."""
+
+    max_web_searches: int = _DEFAULT_MAX_WEB_SEARCHES_PER_TURN
+    max_subagents: int = _DEFAULT_MAX_SUBAGENTS_PER_TURN
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> LoopCapConfig:
+        """Build config from the ``tool_loop_guardrails.loop_caps`` section."""
+        if not isinstance(data, Mapping):
+            return cls()
+        return cls(**{f.name: _int_at_least(data.get(f.name), f.default, 0) for f in fields(cls)})
 
 
 @dataclass(frozen=True)
@@ -275,12 +296,9 @@ class ToolCallGuardrailConfig:
 
     @classmethod
     def from_mapping(
-        cls,
-        data: Mapping[str, Any] | None,
-        *,
-        platform: str | None = None,
-    ) -> "ToolCallGuardrailConfig":
-        """Build config from the `tool_loop_guardrails` config.yaml section."""
+        cls, data: Mapping[str, Any] | None, *, platform: str | None = None,
+    ) -> ToolCallGuardrailConfig:
+        """Build config from `tool_loop_guardrails`; nested ``warn_after`` / ``hard_stop_after`` win over flat legacy keys."""
         if not isinstance(data, Mapping):
             data = {}
 
@@ -421,17 +439,12 @@ def _is_non_interactive_platform(platform: str | None) -> bool:
 
 @dataclass(frozen=True)
 class IdenticalCallObservation:
-    """Outcome of observing one completed tool call for the stall guards.
-
-    ``notice`` is the identical-call loop-breaker notice (appended after the
-    result). ``stub`` is the result-reference replacement for a byte-identical
-    duplicate result (replaces the result content). Both may be set on the
-    same call (3rd+ identical call): the stub replaces the payload and the
-    notice is appended after it.
-    """
+    """``notice`` is appended after the result, ``stub`` replaces a byte-identical duplicate result;
+    ``kind`` names the detector behind the notice (``identical_call_streak`` / ``identical_cycle``)."""
 
     notice: str | None = None
     stub: str | None = None
+    kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -442,11 +455,8 @@ class ToolCallSignature:
     args_hash: str
 
     @classmethod
-    def from_call(
-        cls, tool_name: str, args: Mapping[str, Any] | None
-    ) -> "ToolCallSignature":
-        canonical = canonical_tool_args(args or {})
-        return cls(tool_name=tool_name, args_hash=_sha256(canonical))
+    def from_call(cls, tool_name: str, args: Mapping[str, Any] | None) -> ToolCallSignature:
+        return cls(tool_name=tool_name, args_hash=_sha256(canonical_tool_args(args or {})))
 
     def to_metadata(self) -> dict[str, str]:
         """Return public metadata without raw argument values."""
@@ -1180,7 +1190,7 @@ class ToolCallGuardrailController:
             self._no_progress.pop(signature, None)
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
-        result_hash = _result_hash(result)
+        result_hash = _result_hash(result, tool_name)
         previous = self._no_progress.get(signature)
         repeat_count = 1
         if previous is not None and previous[0] == result_hash:
@@ -1275,7 +1285,7 @@ class ToolCallGuardrailController:
         """
         is_plain_str = isinstance(result, str)
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
-        result_hash = _result_hash(result) if is_plain_str else ""
+        result_hash = _result_hash(result, tool_name) if is_plain_str else ""
 
         if (
             is_plain_str
@@ -1293,43 +1303,14 @@ class ToolCallGuardrailController:
 
         count = self._identical_streak_count
 
-        notice = None
-        if (
-            not is_stall_guard_repeatable(tool_name)
-            and count >= STALL_GUARD_IDENTICAL_CALL_THRESHOLD
-        ):
-            ordinal = f"{count}{'th' if 11 <= count % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(count % 10, 'th')}"
-            notice = (
-                f"[hermes note: this is the {ordinal} consecutive identical call to "
-                f"{tool_name} with identical arguments returning the same result. "
-                "Do not repeat it — change arguments, use a different tool, or "
-                "proceed with what you have.]"
-            )
-            # Hard-stop widening (#89069 / #100849 bundle): the per-turn
-            # no-progress BLOCK above only covers tools in idempotent_tools, so
-            # a model replaying the same successful `terminal`/`skill_view`
-            # call with a byte-identical result ran until the iteration budget.
-            # The consecutive-identical streak is tool-agnostic; when hard
-            # stops are enabled, halt at the same idempotent_no_progress
-            # threshold. Pollers stay exempt (an unchanged poll is progress).
-            if (
-                self.config.hard_stop_enabled
-                and count >= self.config.no_progress_block_after
-                and self._halt_decision is None
-            ):
-                self._halt_decision = ToolGuardrailDecision(
-                    action="halt",
-                    code="identical_call_streak_halt",
-                    message=(
-                        f"Stopped {tool_name}: the same call with identical arguments "
-                        f"returned the same result {count} times in a row. Stop "
-                        "repeating it unchanged; use the result already provided or "
-                        "change strategy."
-                    ),
-                    tool_name=tool_name,
-                    count=count,
-                    signature=signature,
-                )
+        notice = kind = None
+        if not is_stall_guard_repeatable(tool_name) and count >= STALL_GUARD_IDENTICAL_CALL_THRESHOLD:
+            notice, kind = _IDENTICAL_CALL_NOTICE.format(ordinal=_ordinal(count), tool_name=tool_name), "identical_call_streak"
+            # The no-progress BLOCK in before_call only covers idempotent_tools; this streak
+            # is tool-agnostic, so with hard stops on, halt at the same threshold (a model
+            # replaying a successful `terminal` call otherwise runs to the budget).
+            if self.config.hard_stop_enabled and count >= self.config.no_progress_block_after and self._halt_decision is None:
+                self._decide("halt", "identical_call_streak_halt", tool_name, count, signature)
 
         # Batch-cycle detection (oh-my-pi#10521): a repeating multi-call cycle resets the
         # consecutive streak on every alternation, so check the call history for a period-p lap.
@@ -1341,7 +1322,7 @@ class ToolCallGuardrailController:
             cycle = self._detect_identical_cycle()
             if cycle is not None:
                 period, laps = cycle
-                notice = _IDENTICAL_CYCLE_NOTICE.format(count=laps, period=period, tool_name=tool_name)
+                notice, kind = _IDENTICAL_CYCLE_NOTICE.format(count=laps, period=period, tool_name=tool_name), "identical_cycle"
                 if self.config.hard_stop_enabled and laps >= self.config.no_progress_block_after and self._halt_decision is None:
                     self._decide("halt", "identical_cycle_halt", tool_name, laps, signature, period=period)
 
@@ -1353,8 +1334,7 @@ class ToolCallGuardrailController:
             and len(result) >= IDENTICAL_RESULT_STUB_MIN_CHARS
         ):
             stub = self._build_result_reference_stub(tool_name, args)
-
-        return IdenticalCallObservation(notice=notice, stub=stub)
+        return IdenticalCallObservation(notice=notice, stub=stub, kind=kind)
 
     def _detect_identical_cycle(self) -> tuple[int, int] | None:
         """Detect a repeating identical-call cycle ending at the latest observed call.
@@ -1680,22 +1660,31 @@ def _merge_per_tool_caps(raw: Any, defaults: dict[str, int]) -> dict[str, int]:
     return merged
 
 
-def _result_hash(result: str | None) -> str:
+# execute_code reports per-call kernel bookkeeping — a running `kernel.execution_count` and wall-clock
+# `duration_seconds` — that changes on every invocation even when the code did the same thing. Hashed
+# as-is, every replay of an identical empty probe looks new and the identical-call streak never forms
+# (a model re-ran one empty execute_code call 147 times unflagged). Only these known locations in
+# execute_code's own result shape are dropped: for any other tool the same key names can be real output.
+def _without_execute_code_metadata(parsed: Any) -> Any:
+    if not isinstance(parsed, dict):
+        return parsed
+    cleaned = {k: v for k, v in parsed.items() if k != "duration_seconds"}
+    kernel = cleaned.get("kernel")
+    if isinstance(kernel, dict):
+        cleaned["kernel"] = {k: v for k, v in kernel.items() if k != "execution_count"}
+    return cleaned
+
+
+def _result_hash(result: str | None, tool_name: str = "") -> str:
     parsed = safe_json_loads(result or "")
-    if parsed is not None:
-        try:
-            canonical = json.dumps(
-                parsed,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                default=str,
-            )
-        except TypeError:
-            canonical = str(parsed)
-    else:
-        canonical = result or ""
-    return _sha256(canonical)
+    if parsed is None:
+        return _sha256(result or "")
+    if tool_name == "execute_code":
+        parsed = _without_execute_code_metadata(parsed)
+    return _sha256(_canonical_json(parsed))
+
+
+_BOOL_WORDS = {w: True for w in ("1", "true", "yes", "on", "enabled")} | {w: False for w in ("0", "false", "no", "off", "disabled")}
 
 
 def _as_bool(value: Any, default: bool) -> bool:
