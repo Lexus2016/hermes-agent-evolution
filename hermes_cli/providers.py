@@ -58,6 +58,7 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     "vercel": HermesOverlay(is_aggregator=True),
     "opencode": HermesOverlay(is_aggregator=True, base_url_env_var="OPENCODE_ZEN_BASE_URL"),
     "opencode-go": HermesOverlay(is_aggregator=True, base_url_env_var="OPENCODE_GO_BASE_URL"),
+    "commandcode": HermesOverlay(extra_env_vars=("COMMANDCODE_API_KEY",), base_url_env_var="COMMANDCODE_BASE_URL"),
     "kilo": HermesOverlay(is_aggregator=True, base_url_env_var="KILOCODE_BASE_URL"),
     "huggingface": HermesOverlay(is_aggregator=True, base_url_env_var="HF_BASE_URL"),
     "novita": HermesOverlay(is_aggregator=True, base_url_env_var="NOVITA_BASE_URL"),
