@@ -15,6 +15,8 @@ from unittest.mock import Mock
 
 import pytest
 
+import cron.scheduler_worker_env
+
 
 @pytest.fixture
 def execution_ledger(tmp_path, monkeypatch):
@@ -604,10 +606,12 @@ def test_launch_external_worker_pins_the_gateways_tree_on_pythonpath(
 
     assert scheduler._launch_external_cron_worker(job) is True
     repo_root = Path(scheduler.__file__).resolve().parent.parent
+    from cron.scheduler_worker_env import resolve_worker_tree
+    expected_tree = str(resolve_worker_tree(repo_root))
     entries = spawned[0][1]["env"]["PYTHONPATH"].split(os.pathsep)
-    assert entries[0] == str(repo_root)
+    assert entries[0] == expected_tree
     assert str(tmp_path / "user-libs") in entries
-    assert spawned[0][1]["cwd"] == str(repo_root)
+    assert spawned[0][1]["cwd"] == expected_tree
 
 
 def test_launch_external_worker_pin_extends_the_sanitized_env_not_os_environ(
@@ -638,8 +642,9 @@ def test_launch_external_worker_pin_extends_the_sanitized_env_not_os_environ(
     repo_root = Path(scheduler.__file__).resolve().parent.parent
 
     assert scheduler._launch_external_cron_worker(job) is True
+    expected_tree = str(worker_env_mod.resolve_worker_tree(repo_root))
     entries = spawned[0][1]["env"]["PYTHONPATH"].split(os.pathsep)
-    assert entries == [str(repo_root), str(tmp_path / "kept-by-sanitizer")]
+    assert entries == [expected_tree, str(tmp_path / "kept-by-sanitizer")]
 
     # Wheel / pipx layout: repo_root == purelib -> untouched.
     monkeypatch.setattr(worker_env_mod, "_installed_purelib", lambda: repo_root)
@@ -913,3 +918,123 @@ def test_managed_gateway_restart_preserves_active_worker_and_single_side_effect(
             parent.wait(timeout=5)
         if worker_pid is not None and _pid_exists(worker_pid):
             os.kill(worker_pid, signal.SIGKILL)
+
+
+def test_cron_worker_pinned_snapshot_immune_to_conflict_markers_in_live_tree(
+    tmp_path, monkeypatch
+):
+    """#3498: A dirty / mid-merge checkout with conflict markers must not break external cron
+    worker dispatch; dispatch must resolve and run from a clean pinned snapshot of HEAD."""
+    import cron.scheduler as scheduler
+    from cron.scheduler_worker_env import resolve_worker_tree
+    from tools.process_registry import GatewayChildDispatch
+
+    repo = tmp_path / "mock_repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=str(repo),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=str(repo),
+        check=True,
+    )
+
+    (repo / "cron").mkdir()
+    (repo / "cron" / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "cron" / "scheduler.py").write_text("# clean scheduler\n", encoding="utf-8")
+    (repo / "cron" / "jobs.py").write_text("def valid_func():\n    return 42\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo), check=True, capture_output=True)
+
+    hermes_home = tmp_path / "hermes_home"
+    monkeypatch.setattr(scheduler, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: hermes_home)
+
+    clean_snapshot = resolve_worker_tree(repo)
+    assert clean_snapshot != repo
+    assert (clean_snapshot / "cron" / "jobs.py").read_text(encoding="utf-8") == "def valid_func():\n    return 42\n"
+
+    # Introduce conflict marker in the live checkout
+    (repo / "cron" / "jobs.py").write_text(
+        "<<<<<<< HEAD\nSyntaxError: conflict marker\n=======\n",
+        encoding="utf-8",
+    )
+
+    # Worker tree resolution still returns the clean snapshot, immune to the conflict marker
+    resolved_tree = resolve_worker_tree(repo)
+    assert resolved_tree == clean_snapshot
+    assert "<<<<<<< HEAD" not in (resolved_tree / "cron" / "jobs.py").read_text(encoding="utf-8")
+
+    # Verify launch of external worker uses the resolved snapshot tree as cwd
+    job = {"id": "job-1", "execution_id": "exec-1", "prompt": "work"}
+    monkeypatch.setattr(
+        "tools.process_registry.restart_safe_gateway_child_argv",
+        lambda command, **_: GatewayChildDispatch("degraded", command),
+    )
+    monkeypatch.setattr("cron.scheduler_worker_env.resolve_worker_tree", lambda _r: resolved_tree)
+    spawned, _payloads, _handoff, _get = _stub_external_worker_launch(scheduler, monkeypatch)
+
+    assert scheduler._launch_external_cron_worker(job) is True
+    assert spawned[0][1]["cwd"] == str(resolved_tree)
+
+
+def test_is_recurring_constant_and_unreachable_retry():
+    """#3498: cron.constants.is_recurring must be reliably importable and correct."""
+    from cron.constants import is_recurring
+    from cron.unreachable_retry import _is_recurring
+
+    assert is_recurring({"schedule": {"kind": "cron"}}) is True
+    assert is_recurring({"schedule": {"kind": "interval"}}) is True
+    assert is_recurring({"schedule": {"kind": "at"}}) is False
+    assert is_recurring({"schedule": {"kind": "once"}}) is False
+    assert is_recurring({}) is False
+    assert is_recurring(None) is False
+    assert _is_recurring is is_recurring
+
+
+def test_mark_job_run_clears_pending_slot_even_on_failure_and_retry_error(tmp_path, monkeypatch):
+    """#3498: mark_job_run must clear pending_slot even when run fails and plan_retry errors,
+    preventing restore loops."""
+    import cron.jobs as jobs_mod
+
+    jobs_file = tmp_path / "jobs.json"
+    monkeypatch.setattr(jobs_mod, "JOBS_FILE", jobs_file)
+    monkeypatch.setattr(jobs_mod, "CRON_DIR", tmp_path)
+
+    job = {
+        "id": "job-test-restore",
+        "name": "Restore Loop Test",
+        "schedule": {"kind": "cron", "expr": "0 * * * *"},
+        "enabled": True,
+        "state": "scheduled",
+        "next_run_at": "2026-10-18T12:00:00Z",
+        "pending_slot": {"scheduled_at": "2026-10-18T11:00:00Z", "at": "2026-10-18T11:00:00Z", "by": "host:123"},
+    }
+    jobs_mod.save_jobs([job])
+
+    # Simulate plan_retry error to test resilience of fallback path
+    def broken_plan_retry(_job):
+        raise RuntimeError("broken plan_retry simulation")
+
+    monkeypatch.setattr("cron.unreachable_retry.plan_retry", broken_plan_retry)
+
+    success = jobs_mod.mark_job_run(
+        "job-test-restore",
+        success=False,
+        error="simulated dispatch failure",
+        model_unreachable=True,
+    )
+    assert success is True
+
+    loaded = jobs_mod.load_jobs()
+    assert len(loaded) == 1
+    updated_job = loaded[0]
+    assert "pending_slot" not in updated_job
+    assert updated_job["next_run_at"] is not None
+    assert updated_job["last_error"] == "simulated dispatch failure"
+

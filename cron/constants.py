@@ -15,3 +15,12 @@ FIRE_CLAIM_SKEW_SECONDS = 60
 # wall-clock cap, so healthy runs may legitimately exceed it and a TTL of exactly the timeout
 # would expire live claims.
 CLAIM_TTL_INACTIVITY_HEADROOM = 3
+
+
+def is_recurring(job: dict) -> bool:
+    """Return True if job has a recurring schedule ('cron' or 'interval')."""
+    if not isinstance(job, dict):
+        return False
+    schedule = job.get("schedule")
+    return isinstance(schedule, dict) and schedule.get("kind") in {"cron", "interval"}
+

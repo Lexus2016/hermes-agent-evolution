@@ -61,8 +61,9 @@ def is_model_unreachable_failure(exc: BaseException, agent: Any = None) -> bool:
     return _is_transient_provider_resolve_error(exc)
 
 
-def _is_recurring(job: Dict[str, Any]) -> bool:
-    return job.get("schedule", {}).get("kind") in {"cron", "interval"}
+from cron.constants import is_recurring
+
+_is_recurring = is_recurring
 
 
 def will_retry(job: Dict[str, Any]) -> bool:

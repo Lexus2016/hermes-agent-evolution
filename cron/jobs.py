@@ -2915,43 +2915,47 @@ def mark_job_run(
             return True
         _record_run_outcome(job, success, error, delivery_error, status, now, tool_calls=tool_calls)
         _advance_after_run(job, now)
-        from cron import quota_hold
-        from cron.unreachable_retry import clear_state, plan_retry
+        job.pop("pending_slot", None)
+        try:
+            from cron import quota_hold
+            from cron.unreachable_retry import clear_state, plan_retry
 
-        if not success and model_unreachable and not is_terminal_job(job):
-            # Transient network/DNS: bounded re-run instead of waiting a full period.
-            plan_retry(job)
-        else:
-            # Any run that reached the model (either outcome) resets the re-run ladder.
-            clear_state(job)
-            # #70: apply failure backoff (skip scheduled slots) and, past
-            # the auto-pause threshold, pause the job for operator review
-            # instead of retrying a deterministic failure indefinitely.
-            # Unreachable retries own next_run_at via plan_retry above — do not
-            # also skip slots or auto-pause that path.
-            if not success and status not in _SYNTHETIC_FAILURE_STATUSES:
-                _skips = int(job.get("failure_backoff_skips") or 0)
-                if _skips > 0 and job.get("next_run_at") is not None:
-                    job["next_run_at"] = _advance_schedule_by_steps(
-                        job["schedule"], job["next_run_at"], _skips
-                    )
-                if (
-                    int(job.get("failure_streak") or 0)
-                    >= _failure_auto_pause_threshold()
-                ):
-                    job["enabled"] = False
-                    job["state"] = "paused"
-                    job["paused_at"] = now
-                    job["paused_reason"] = (
-                        "auto-paused after %d identical consecutive "
-                        "failures (last error: %.200s) — resume to retry"
-                        % (int(job["failure_streak"]), error or "")
-                    )
-                    job["next_run_at"] = None
-        if not success and quota_hold_seconds and not is_terminal_job(job):
-            quota_hold.plan_hold(job, quota_hold_seconds)
-        else:
-            quota_hold.clear_state(job)
+            if not success and model_unreachable and not is_terminal_job(job):
+                # Transient network/DNS: bounded re-run instead of waiting a full period.
+                plan_retry(job)
+            else:
+                # Any run that reached the model (either outcome) resets the re-run ladder.
+                clear_state(job)
+                # #70: apply failure backoff (skip scheduled slots) and, past
+                # the auto-pause threshold, pause the job for operator review
+                # instead of retrying a deterministic failure indefinitely.
+                # Unreachable retries own next_run_at via plan_retry above — do not
+                # also skip slots or auto-pause that path.
+                if not success and status not in _SYNTHETIC_FAILURE_STATUSES:
+                    _skips = int(job.get("failure_backoff_skips") or 0)
+                    if _skips > 0 and job.get("next_run_at") is not None:
+                        job["next_run_at"] = _advance_schedule_by_steps(
+                            job["schedule"], job["next_run_at"], _skips
+                        )
+                    if (
+                        int(job.get("failure_streak") or 0)
+                        >= _failure_auto_pause_threshold()
+                    ):
+                        job["enabled"] = False
+                        job["state"] = "paused"
+                        job["paused_at"] = now
+                        job["paused_reason"] = (
+                            "auto-paused after %d identical consecutive "
+                            "failures (last error: %.200s) — resume to retry"
+                            % (int(job["failure_streak"]), error or "")
+                        )
+                        job["next_run_at"] = None
+            if not success and quota_hold_seconds and not is_terminal_job(job):
+                quota_hold.plan_hold(job, quota_hold_seconds)
+            else:
+                quota_hold.clear_state(job)
+        except Exception:
+            logger.exception("mark_job_run: error in failure/retry post-processing for job %s", job_id)
         save_jobs(jobs)
         return True
 
