@@ -6,7 +6,10 @@ channels, and the reconcile gating — without ever touching the network or uv.
 """
 
 import pytest
-import yaml
+try:
+    import hermes_yaml as yaml
+except ImportError:
+    import yaml
 
 import hermes_cli.tqmemory_setup as tqm
 
@@ -161,7 +164,7 @@ class TestOptOut:
 
     def test_default_not_opted_out(self, monkeypatch):
         monkeypatch.delenv(tqm.OPT_OUT_ENV, raising=False)
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
+        monkeypatch.setattr("hermes_cli.config.read_raw_config", dict)
         assert tqm.opted_out() is False
 
 
@@ -230,3 +233,13 @@ class TestRegisterForProfile:
         cfg = tmp_path / "config.yaml"
         assert tqm.register_for_profile(cfg) is False
         assert not cfg.exists()
+
+
+class TestFindUvDoesNotTriggerTakeover:
+    def test_find_uv_never_calls_managed_uv(self, monkeypatch):
+        from hermes_cli import managed_uv
+        def _fail(*args, **kwargs):
+            pytest.fail("managed_uv.resolve_uv must not be called by _find_uv")
+        monkeypatch.setattr(managed_uv, "resolve_uv", _fail)
+        uv = tqm._find_uv()
+        assert uv is None or isinstance(uv, str)

@@ -104,14 +104,20 @@ def _is_managed() -> bool:
 # Binary / uv resolution
 # ---------------------------------------------------------------------------
 
-def _candidate_bins() -> List[Path]:
+def _candidate_bins() -> list[Path]:
     home = Path.home()
     return [home / ".local" / "bin", home / ".cargo" / "bin"]
 
 
 def _find_uv() -> Optional[str]:
-    from hermes_cli.managed_uv import resolve_uv
-    found = resolve_uv() or shutil.which("uv")
+    try:
+        import pm
+        launcher = pm.uv_launcher("uv")
+        if launcher is not None and launcher.is_file():
+            return str(launcher)
+    except (ImportError, AttributeError, ValueError, OSError):
+        pass  # health: allow S110 -- PM optional or uv launcher not present
+    found = shutil.which("uv")
     if found:
         return found
     for base in _candidate_bins():
@@ -219,14 +225,17 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     Round-trip through ``atomic_config_write`` so comments and ``${ENV}``
     templates survive. Idempotent: skips when an entry already exists.
     """
-    import yaml
+    try:
+        import hermes_yaml as yaml
+    except ImportError:
+        import yaml
     from hermes_cli.config import atomic_config_write
 
     existed = config_path.exists()
     data: dict = {}
     if existed:
         try:
-            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8-sig"))
         except Exception as exc:
             logger.warning("tqmemory: cannot parse %s (%s) — skipping", config_path, exc)
             return False
@@ -305,9 +314,9 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     return True
 
 
-def _all_profile_config_paths() -> List[Path]:
+def _all_profile_config_paths() -> list[Path]:
     """Every profile's config.yaml (default + named), for all-session coverage."""
-    paths: List[Path] = []
+    paths: list[Path] = []
     try:
         from hermes_cli.profiles import list_profiles
 
@@ -386,7 +395,7 @@ def verify_tqmemory(tqm_path: Optional[str] = None) -> bool:
     try:
         res = subprocess.run(
             [path, "--help"],
-            capture_output=True, text=True, timeout=_VERIFY_TIMEOUT,
+            capture_output=True, text=True, timeout=_VERIFY_TIMEOUT, check=False,
         )
         return res.returncode == 0
     except Exception as exc:
@@ -404,7 +413,7 @@ def verify_tqmemory(tqm_path: Optional[str] = None) -> bool:
 _reconciled_this_process = False
 
 
-def reconcile_tqmemory(quiet: bool = False, once: bool = False) -> Tuple[bool, int]:
+def reconcile_tqmemory(quiet: bool = False, once: bool = False) -> tuple[bool, int]:
     """Install if missing + register across all profiles + verify.
 
     Returns ``(installed, profiles_changed)``. Always non-fatal — any failure
@@ -442,7 +451,7 @@ def reconcile_tqmemory(quiet: bool = False, once: bool = False) -> Tuple[bool, i
         return (False, 0)
 
 
-def _run(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             cmd,
@@ -451,6 +460,7 @@ def _run(cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            check=False,
         )
     except Exception as exc:
         logger.debug("tqmemory: command %s failed (%s)", cmd[:2], exc)
@@ -464,7 +474,7 @@ def _emit(quiet: bool, message: str) -> None:
         print(message)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """``python -m hermes_cli.tqmemory_setup`` — used by setup-hermes.sh."""
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     reconcile_tqmemory(quiet=False)

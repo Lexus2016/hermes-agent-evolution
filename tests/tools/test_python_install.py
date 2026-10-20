@@ -26,9 +26,6 @@ class TestIsPep668Active:
         _real_join = os.path.join
         os.makedirs(fake_stdlib, exist_ok=True)
         open(marker, "w").close()
-        orig_dirname = pi.os.path.dirname
-        orig_join = pi.os.path.join
-        orig_exists = pi.os.path.exists
 
         def _dirname(p):
             return fake_stdlib
@@ -47,7 +44,6 @@ class TestIsPep668Active:
     def test_false_when_marker_missing(self, monkeypatch, tmp_path):
         fake_stdlib = str(tmp_path / "stdlib")
         os.makedirs(fake_stdlib, exist_ok=True)
-        orig_dirname = pi.os.path.dirname
 
         def _dirname(p):
             return fake_stdlib
@@ -155,3 +151,15 @@ class TestGetInstallHint:
         monkeypatch.setattr(pi, "_uv_python_flag", lambda: "--python=/usr/bin/python3")
         hint = pi.get_install_hint()
         assert "uv pip install" in hint
+
+
+class TestUvResolutionDoesNotTriggerTakeover:
+    def test_has_uv_and_flag_never_call_managed_uv(self, monkeypatch):
+        from hermes_cli import managed_uv
+        def _fail(*args, **kwargs):
+            pytest.fail("managed_uv.resolve_uv must not be called by python_install")
+        monkeypatch.setattr(managed_uv, "resolve_uv", _fail)
+        res = pi.has_uv()
+        assert isinstance(res, bool)
+        flag = pi._uv_python_flag()
+        assert flag is None or isinstance(flag, str)

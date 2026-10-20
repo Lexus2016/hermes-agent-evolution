@@ -51,14 +51,28 @@ def is_pep668_active() -> bool:
 
 
 def has_uv() -> bool:
-    from hermes_cli.managed_uv import resolve_uv
-    return (resolve_uv() or shutil.which("uv")) is not None
+    try:
+        import pm
+        launcher = pm.uv_launcher("uv")
+        if launcher is not None and launcher.is_file():
+            return True
+    except (ImportError, AttributeError, ValueError, OSError):
+        pass  # health: allow S110 -- PM optional or uv launcher not present
+    return shutil.which("uv") is not None
 
 
 def _uv_python_flag() -> Optional[str]:
     """Return a ``--python=...`` flag targeting the current interpreter, or None."""
-    from hermes_cli.managed_uv import resolve_uv
-    uv = resolve_uv() or shutil.which("uv")
+    uv = None
+    try:
+        import pm
+        launcher = pm.uv_launcher("uv")
+        if launcher is not None and launcher.is_file():
+            uv = str(launcher)
+    except (ImportError, AttributeError, ValueError, OSError):
+        pass  # health: allow S110 -- PM optional or uv launcher not present
+    if not uv:
+        uv = shutil.which("uv")
     if not uv:
         return None
     rc, _, _ = _run([uv, "python", "find", sys.executable])
@@ -67,7 +81,7 @@ def _uv_python_flag() -> Optional[str]:
     return None
 
 
-def ensure_transient_venv() -> Tuple[str, bool]:
+def ensure_transient_venv() -> tuple[str, bool]:
     """Create (or reuse) a transient venv and return ``(venv_dir, created_now)``.
 
     The venv is created under ``/tmp`` with a stable name derived from the
