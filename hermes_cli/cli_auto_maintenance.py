@@ -61,6 +61,9 @@ def _run_state_db_auto_maintenance(session_db) -> None:
             min_vacuum_interval_days=int(cfg.get("min_vacuum_interval_days", 30)),
             vacuum=bool(cfg.get("vacuum_after_prune", True)),
             sessions_dir=_hermes_home_maint / "sessions",
+            db_size_vacuum_threshold=int(
+                cfg.get("db_size_vacuum_threshold", 768 * 1024 * 1024)
+            ),
         )
     except Exception as exc:
         logger.debug("state.db auto-maintenance skipped: %s", exc)

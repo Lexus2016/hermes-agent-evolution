@@ -1436,3 +1436,22 @@ class TestSessionDiff:
         assert result["success"] is True
         assert "feature.py" in result["diff"]
         assert "+x = 1" in result["diff"]
+
+
+class TestCheckpointManagerCompatibilityShims:
+    def test_relocated_maintenance_imports_resolve_via_getattr(self):
+        import tools.checkpoint_maintenance as maint
+        from tools import checkpoint_manager as cpm
+
+        assert cpm.auto_prune_from_config is maint.auto_prune_from_config
+        assert cpm.prune_checkpoints is maint.prune_checkpoints
+        assert cpm.maybe_auto_prune_checkpoints is maint.maybe_auto_prune_checkpoints
+        assert cpm.checkpoint_footprint_notice is maint.checkpoint_footprint_notice
+        assert cpm.store_status is maint.store_status
+        assert cpm.clear_all is maint.clear_all
+        assert cpm.clear_legacy is maint.clear_legacy
+
+    def test_missing_attribute_raises_attribute_error(self):
+        from tools import checkpoint_manager as cpm
+        with pytest.raises(AttributeError):
+            _ = cpm.non_existent_symbol_xyz

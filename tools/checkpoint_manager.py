@@ -454,7 +454,7 @@ def _unlink_quiet(path: Path) -> None:
         pass
 
 
-def _unreadable_dirs(working_dir: Path) -> List[str]:
+def _unreadable_dirs(working_dir: Path) -> list[str]:
     """Return top-relative paths of directories under *working_dir* that cannot be read.
 
     ``git add -A`` can fail hard (rc=128) when the working tree contains
@@ -463,9 +463,9 @@ def _unreadable_dirs(working_dir: Path) -> List[str]:
     from staging with ``:(exclude,top)<rel>`` pathspecs so one inaccessible
     subtree does not silently kill every checkpoint of the project (#127).
     """
-    unreadable: List[str] = []
+    unreadable: list[str] = []
     for root, dirs, _files in os.walk(working_dir):
-        kept: List[str] = []
+        kept: list[str] = []
         for name in dirs:
             path = Path(root) / name
             if os.access(path, os.R_OK | os.X_OK):
@@ -1718,3 +1718,19 @@ def format_checkpoint_list(checkpoints: list[dict], directory: str) -> str:
     lines.append("  /rollback diff <N>        preview changes since checkpoint N")
     lines.append("  /rollback <N> <file>      restore a single file from checkpoint N")
     return "\n".join(lines)
+
+
+def __getattr__(name: str):
+    """Compatibility shim for maintenance functions relocated to checkpoint_maintenance."""
+    if name in (
+        "auto_prune_from_config",
+        "prune_checkpoints",
+        "maybe_auto_prune_checkpoints",
+        "checkpoint_footprint_notice",
+        "store_status",
+        "clear_all",
+        "clear_legacy",
+    ):
+        import tools.checkpoint_maintenance as _maint
+        return getattr(_maint, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
