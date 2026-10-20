@@ -3785,7 +3785,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         try:
             return await self._send_text_locked(chat_id, content, reply_to, metadata)
         finally:
-            self._release_chat_send_gate(chat_id, _send_gate)
+            await self._release_chat_send_gate(chat_id, _send_gate)
 
     async def _send_text_locked(
         self, chat_id: str, content: str, reply_to: Optional[str], metadata: Optional[dict[str, Any]]) -> SendResult:
@@ -5682,20 +5682,32 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         task = asyncio.current_task()
         if task is not None and self._chat_send_gate_holders.get(key) is task:
             return False
-        await self._chat_send_lock(chat_id).acquire()
+        # ``_chat_send_lock`` is an asynccontextmanager (reentrant per task) after v0.22.2: enter it
+        # by hand so the gate can be held across ``send()`` / ``_send_text_locked`` and released from
+        # a different method. Calling ``.acquire()`` on it raised AttributeError on every send.
+        cm = self._chat_send_lock(chat_id)
+        await cm.__aenter__()
         self._chat_send_gate_holders[key] = task
+        if not hasattr(self, "_chat_send_gate_cms"):
+            self._chat_send_gate_cms = {}
+        self._chat_send_gate_cms[key] = cm
         return True
 
-    def _release_chat_send_gate(self, chat_id: Any, acquired: bool) -> None:
+    async def _release_chat_send_gate(self, chat_id: Any, acquired: bool) -> None:
         """Release a gate taken by ``_acquire_chat_send_gate``; a no-op for a reentrant pass-through."""
         if not acquired:
             return
         key = self._chat_key(chat_id)
         if hasattr(self, "_chat_send_gate_holders"):
             self._chat_send_gate_holders.pop(key, None)
-        lock = self._chat_send_lock(chat_id)
-        if lock.locked():
-            lock.release()
+        cm = None
+        if hasattr(self, "_chat_send_gate_cms"):
+            cm = self._chat_send_gate_cms.pop(key, None)
+        if cm is not None:
+            try:
+                await cm.__aexit__(None, None, None)
+            except (RuntimeError, StopAsyncIteration):
+                pass
 
     def _chat_send_lock(self, chat_id: str) -> asyncio.Lock:
         """The send lock for one chat: one message at a time, so its chunks land contiguously.

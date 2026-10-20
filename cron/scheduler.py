@@ -4650,6 +4650,34 @@ def _wait_for_external_cron_worker(
                 pass
 
 
+def _worker_python() -> str:
+    """Interpreter for the external cron worker.
+
+    A snapshot checkout under ``<home>/cron/snapshots/<sha>`` is its own install key with no
+    committed dependency generation, so ``activate_dependencies`` refuses the PM store Python
+    ("no dependency environment is committed for this install") and every scheduled job dies
+    before it starts. Boot the worker on the owning checkout's committed venv instead: a venv
+    interpreter carries its own packages, so the bootstrap accepts it. Falls back to the current
+    interpreter when no generation is recorded.
+    """
+    import sys as _sys
+
+    if _sys.prefix != _sys.base_prefix:
+        return _sys.executable
+    try:
+        from pathlib import Path as _Path
+
+        from pm.environments import committed_venv
+
+        environment = committed_venv(_Path(__file__).resolve().parent.parent)
+        candidate = environment / "bin" / "python" if environment is not None else None
+        if candidate is not None and candidate.is_file():
+            return str(candidate)
+    except Exception:
+        pass
+    return _sys.executable
+
+
 def _launch_external_cron_worker(job: dict) -> bool:
     """Launch *job* outside the managed gateway process when required.
 
@@ -4673,7 +4701,7 @@ def _launch_external_cron_worker(job: dict) -> bool:
     # Captured so a worker that dies before its acknowledgement can name the cause (#112729).
     stderr_path = handoff_dir / f"{execution_id}.stderr"
     command = [
-        sys.executable,
+        _worker_python(),
         "-m",
         "cron.scheduler",
         "--external-worker-file",
