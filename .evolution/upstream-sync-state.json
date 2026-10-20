@@ -8,13 +8,13 @@
   "_note": "synced_through_commit is the LOGICAL cursor: the upstream commit through which evolution-upstream-sync has ACCOUNTED for every commit (applied OR deferred). Each run processes the next <=25 commits AFTER it (oldest-first) and advances it \u2014 so nothing in the window is ever silently skipped. Seeded to the merge-base of our main and upstream/main (the honest contiguous synced point). synced_through_tag/date = newest upstream release tag that is an ancestor of the cursor (mirrored into __release_date__ for the banner); they advance ONLY when the cursor crosses a new tag. deferred[] records commits evaluated but not applied (conflict/irrelevant) with reasons, for owner review.",
   "release_sync": {
     "mode": "release-track",
-    "integrated_tag": "v2026.9.24",
-    "integrated_version": "0.21.5",
-    "pr": 3436,
-    "merge_commit": "3f3ee4a1a0a703f9161d12d82161ffa25e917046",
-    "merged_at": "2026-09-29T17:47:15Z",
-    "verified": "git merge-base --is-ancestor v2026.9.24 origin/main -> true; git rev-list --count main..v2026.9.24 = 0",
-    "checked_at": "2026-10-01",
+    "integrated_tag": "v0.22.2",
+    "integrated_version": "0.22.2",
+    "pr": 3506,
+    "merge_commit": "39fc142b7e690bbebeed0691aa944aa4dd98624f",
+    "merged_at": "2026-10-20T06:54:47Z",
+    "verified": "git merge-base --is-ancestor v0.22.2 origin/main -> true; git rev-list --count main..v0.22.2 = 0",
+    "checked_at": "2026-10-20",
     "_note": "Release-track merges (upstream RELEASE TAGS merged into a sync/upstream-release-* branch + PR, owner-gated) are recorded HERE, not in synced_through_commit: the incremental 25-commit cursor is not advanced by release merges. Stale catchup_in_progress block removed 2026-10-01 (its PR #1641 merged 2026-08-04 and branch sync/upstream-catchup no longer exists on origin)."
   }
 }
