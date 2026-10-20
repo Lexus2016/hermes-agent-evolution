@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hermes Evolution Step-Level Failure Codebook",
+  "version": "1.0.0",
+  "reference": "Annotrace: A Workbench for Step-Level Annotation of Agent Traces (arXiv:2610.23284)",
+  "step_types": [
+    "delegation",
+    "tool_call",
+    "gate_decision"
+  ],
+  "confidence_threshold_default": 0.8,
+  "codebook": {
+    "delegation": {
+      "description": "Steps that dispatch or delegate execution to subagents, child tasks, or external execution tiers.",
+      "failure_classes": {
+        "timeout": {
+          "description": "Delegated subagent or sub-task execution exceeded the wall-clock deadline or loop-guard execution budget.",
+          "signals": ["deadline exceeded", "subagent timed out", "execution timeout in child task"]
+        },
+        "context_overflow": {
+          "description": "Delegated payload or cumulative subagent conversation exceeded the context length or prompt token limit.",
+          "signals": ["context length exceeded", "prompt tokens exceed limit", "maximum context budget reached"]
+        },
+        "recursion_limit": {
+          "description": "Delegation cycle or call-depth threshold reached (e.g., A -> B -> A or nested subagent depth >= limit).",
+          "signals": ["maximum delegation depth exceeded", "recursive delegation loop detected"]
+        },
+        "subagent_crash": {
+          "description": "Subagent process terminated abnormally with an unhandled exception or runtime crash.",
+          "signals": ["subagent process exited abnormally", "internal runtime error in child task", "subagent exception"]
+        },
+        "contract_violation": {
+          "description": "Subagent returned a malformed response, missing required schema attributes, or violated the expected task contract.",
+          "signals": ["schema validation failed on subagent result", "missing expected output field", "contract mismatch"]
+        },
+        "unauthorized_delegation": {
+          "description": "Delegation rejected by access policy, missing delegation capabilities, or target role disallowed.",
+          "signals": ["delegation not permitted for current role", "unauthorized delegation target"]
+        },
+        "other_delegation_failure": {
+          "description": "Unclassified delegation anomalies that do not match the above mutually exclusive classes.",
+          "signals": ["unspecified delegation error"]
+        }
+      }
+    },
+    "tool_call": {
+      "description": "Steps invoking environment tools (file access, code execution, search, patching, terminal).",
+      "failure_classes": {
+        "precondition_failed": {
+          "description": "Tool invocation preconditions not met (file not found, invalid arguments, indentation mismatch, missing patch anchor).",
+          "signals": ["no such file", "not found", "does not exist", "cannot find", "patch-no-match", "patch-indentation-mismatch", "old_string is empty", "invalid argument"]
+        },
+        "permission_denied": {
+          "description": "Invocation blocked by environment permissions, protected path guards, or safety policies.",
+          "signals": ["permission denied", "access denied", "write-sensitive-path", "write-protected-instruction", "safety-gate-blocked", "forbidden", "EACCES"]
+        },
+        "execution_error": {
+          "description": "Tool ran but execution failed with a non-zero exit code or internal command error.",
+          "signals": ["non-zero exit code", "command failed", "execution exception", "syntaxerror", "nameerror"]
+        },
+        "timeout": {
+          "description": "Tool execution was terminated after exceeding the allotted runtime timeout.",
+          "signals": ["timed out", "timeout", "deadline exceeded", "ETIMEDOUT"]
+        },
+        "output_unparsable": {
+          "description": "Tool stdout/output could not be parsed into expected structured data or JSON envelope.",
+          "signals": ["jsondecodeerror", "parse error", "unexpected token", "unparsable tool output"]
+        },
+        "quota_exceeded": {
+          "description": "Rate limits, token quotas, or billing credit limits encountered during tool execution.",
+          "signals": ["rate limit", "quota exceeded", "too many requests", "429", "insufficient credits"]
+        },
+        "other_tool_failure": {
+          "description": "Unclassified tool failures that do not match the above mutually exclusive classes.",
+          "signals": ["unspecified tool failure"]
+        }
+      }
+    },
+    "gate_decision": {
+      "description": "Steps evaluating automated quality, safety, evidence, or regression gates.",
+      "failure_classes": {
+        "evidence_mismatch": {
+          "description": "Claim rejected because supplied evidence is absent, non-factual, unsupported, or of incompatible type.",
+          "signals": ["evidence_type_mismatch", "unbacked claim", "unsupported assertion", "no matching evidence span"]
+        },
+        "safety_violation": {
+          "description": "Gate rejected candidate due to safety policy, prompt injection, or sensitive content exposure.",
+          "signals": ["safety policy violation", "prompt injection risk", "sensitive data detected"]
+        },
+        "regression_detected": {
+          "description": "Candidate introduces quality regressions, broken test suites, or performance score degradation.",
+          "signals": ["regression detected", "test suite failed", "benchmark score decreased"]
+        },
+        "policy_rejected": {
+          "description": "Candidate violated structural repo invariants, code style policies, or budget limits.",
+          "signals": ["invariant violated", "budget overspent", "prohibited mutation pattern", "admission gate rejected"]
+        },
+        "holdout_failed": {
+          "description": "Candidate failed generalization on the holdout evaluation trace set.",
+          "signals": ["holdout generalization failure", "overfitting detected on holdout set"]
+        },
+        "other_gate_failure": {
+          "description": "Unclassified gate rejections that do not match the above mutually exclusive classes.",
+          "signals": ["unspecified gate rejection"]
+        }
+      }
+    }
+  }
+}
