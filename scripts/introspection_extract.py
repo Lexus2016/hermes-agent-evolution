@@ -54,6 +54,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from hermes_constants import get_hermes_home
 
+try:
+    from introspection_codebook import (
+        StepAnnotation,
+        aggregate_step_annotations,
+        prelabel_step,
+    )
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from introspection_codebook import (
+        StepAnnotation,
+        aggregate_step_annotations,
+        prelabel_step,
+    )
+
 
 def _tool_result_failed(content: Any) -> bool:
     """Structural failure classifier for a tool result (issue #347).
@@ -528,6 +542,7 @@ def scan_messages(messages) -> Dict[str, Any]:
     consec_tool = None
     consec_n = 0
     max_runs: Counter = Counter()  # tool -> max consecutive in this session
+    step_annotations: List[Dict[str, Any]] = []
 
     for obj in messages:
         if not isinstance(obj, dict):
@@ -575,6 +590,34 @@ def scan_messages(messages) -> Dict[str, Any]:
                     tool_failures_by_reason[tool][reason] = (
                         tool_failures_by_reason[tool].get(reason, 0) + 1
                     )
+                # Step-level pre-labelling against failure codebook (#3508)
+                step_data: Dict[str, Any] = {
+                    "step_id": obj.get("tool_call_id") or f"tool-{tool}-{len(step_annotations)}",
+                    "tool": tool,
+                    "tool_name": tool,
+                    "reason": reason,
+                }
+                inspect_payload: Dict[str, Any] = dict(step_data)
+                if isinstance(content, (str, bytes)):
+                    try:
+                        parsed = json.loads(content if isinstance(content, str) else content.decode("utf-8", "replace"))
+                        if isinstance(parsed, dict):
+                            for k in ("exit_code", "exit_code_meaning", "status", "reason"):
+                                if k in parsed and isinstance(parsed[k], (str, int, float, bool)):
+                                    step_data[k] = parsed[k]
+                            inspect_payload.update(parsed)
+                    except Exception:
+                        pass
+                elif isinstance(content, dict):
+                    for k in ("exit_code", "exit_code_meaning", "status", "reason"):
+                        if k in content and isinstance(content[k], (str, int, float, bool)):
+                            step_data[k] = content[k]
+                    inspect_payload.update(content)
+
+                is_delegation = tool in ("delegate_task", "subagent") or "subagent" in tool.lower()
+                stype = "delegation" if is_delegation else "tool_call"
+                ann = prelabel_step(inspect_payload, step_type=stype)
+                step_annotations.append(ann.to_dict())
             if failed and isinstance(content, str) and _TIMEOUT_RE.search(content):
                 timeouts += 1
 
@@ -586,6 +629,7 @@ def scan_messages(messages) -> Dict[str, Any]:
         "refusals": refusals,
         "refusals_with_recovery": refusals_recovered,
         "repeated_tool_runs": repeated,
+        "step_annotations": step_annotations,
     }
 
 
@@ -657,6 +701,7 @@ def build_digest(
     models: Counter = Counter()
     repeated: Dict[str, Dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
     scanned = 0
+    all_step_annotations: List[Dict[str, Any]] = []
 
     def _aggregate(s: Dict[str, Any]) -> None:
         nonlocal timeouts, refusals, refusals_recovered
@@ -675,6 +720,7 @@ def build_digest(
         refusals_recovered += s.get("refusals_with_recovery", 0)
         provider_errors.update(s.get("provider_errors", {}))
         models.update(s.get("models", {}))
+        all_step_annotations.extend(s.get("step_annotations", []))
         for tool, n in s.get("repeated_tool_runs", {}).items():
             r = repeated.setdefault(tool, {"max_consecutive": 0, "sessions": 0})
             r["max_consecutive"] = max(r["max_consecutive"], n)
@@ -778,6 +824,16 @@ def build_digest(
     # rate holds, or rise while recovery improves.
     refusal_recovery_rate = round(refusals_recovered / refusals, 4) if refusals else 0.0
 
+    step_failure_classes = aggregate_step_annotations(all_step_annotations)
+    escalated_items = [a for a in all_step_annotations if a.get("escalated")]
+    step_annotations_summary = {
+        "total_steps_annotated": len(all_step_annotations),
+        "escalated_count": len(escalated_items),
+        "escalated_ratio": round(len(escalated_items) / len(all_step_annotations), 4) if all_step_annotations else 0.0,
+        "failure_class_counts": step_failure_classes,
+        "escalated_samples": escalated_items[:10],
+    }
+
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
@@ -794,7 +850,9 @@ def build_digest(
             "repeated_tool_runs": repeated,
             "provider_errors": dict(provider_errors.most_common()),
             "models_used": dict(models.most_common()),
+            "step_failure_classes": step_failure_classes,
         },
+        "step_annotations_summary": step_annotations_summary,
     }
 
 
