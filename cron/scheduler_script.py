@@ -138,6 +138,34 @@ exec(code, main.__dict__)
 """
 
 
+def _installed_generation_python() -> Optional[Path]:
+    """A committed generation's interpreter, looked up across this data root's installs.
+
+    Snapshot checkouts (``<home>/cron/snapshots/<sha>``) are copies, not installs: they carry no
+    dependency state and no in-tree venv, so ``project_python`` names a path that never exists
+    there. The generation that installed the data root does exist.
+    """
+    import json
+
+    try:
+        from pm.environments import installs_root
+
+        for facts in sorted(installs_root().glob("*/facts.json")):
+            try:
+                data = json.loads(facts.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            environment = ((data.get("packages") or {}).get("venv") or {}).get("environment")
+            if not environment:
+                continue
+            candidate = Path(environment) / "bin" / "python"
+            if candidate.is_file():
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
 def _posix_cron_script_argv(script: Path) -> tuple[list[str], dict[str, str]]:
     """POSIX managed-store installs run cron ``.py`` scripts on the selected dependency venv's
     interpreter: the store Python has the repo and managed site-packages only on its in-process
@@ -156,6 +184,8 @@ def _posix_cron_script_argv(script: Path) -> tuple[list[str], dict[str, str]]:
     # project_python, not committed_venv as on Windows: a pre-PM venv selected before the first
     # commit runs on its OWN interpreter here, so there is no ABI mix (#122183).
     python = project_python(repo)
+    if not python.is_file():
+        python = _installed_generation_python() or python
     if not python.is_file():
         # The caller's interpreter is the bare store Python here — the #123044 failure mode.
         raise RuntimeError(f"dependency environment interpreter is missing: {python}")
