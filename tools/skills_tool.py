@@ -706,12 +706,6 @@ def skill_view(
         readiness, readiness_extras = _skill_readiness(frontmatter, skill_name)
         rendered_content = content if not preprocess else _preprocess_skill(
             content, skill_dir, task_id, "Could not preprocess skill content for %s", skill_name)
-        org_provenance, header = None, ""
-        if skill_dir:
-            try:
-                org_provenance, header = _org_provenance_header(skill_dir, active_skills_dir)
-            except Exception:
-                logger.debug("Could not resolve org provenance for %s", skill_name, exc_info=True)
         skill_schema = extract_skill_schema(frontmatter)
 
         # ── pm tool deps (`deps: [ffmpeg]` frontmatter) ──────────────

@@ -428,7 +428,7 @@ def _persist_choice(session_key: str, choice: str, keys: list[str]) -> None:
         if choice not in ("session", "always"):
             continue
         approve_session(session_key, key)
-        if choice == "always":
+        if choice == "always" and not key.startswith("tirith:"):
             approve_permanent(key)
             with _lock:
                 snapshot = set(_permanent_set())
@@ -845,7 +845,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
         if result is not None:
             return result
     pending_body = pending_body() if pending_body else None
-    allow_permanent = not smart_denied
+    allow_permanent = not smart_denied and any(not key.startswith("tirith:") for key in pattern_keys)
 
     def deny(template: str, outcome: str, **fmt) -> dict:
         breaker = ""
@@ -894,7 +894,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
             data = {
                 "command": display_command, "pattern_key": pattern_key,
                 "pattern_keys": pattern_keys, "description": display_description,
-                "allow_permanent": not smart_denied,
+                "allow_permanent": allow_permanent,
                 "allow_session": not smart_denied,
             }
             if smart_denied:
@@ -1199,15 +1199,20 @@ def _tirith_scan(command: str) -> dict:
     """Tirith result for the interactive flow; an un-importable scanner allows
     (default) or, under fail-closed, synthesizes a HIGH warn finding that goes
     through the normal approval flow (#20733)."""
+    from tools.tirith_config import (
+        TirithConfigurationError, configuration_error_result, load_security_config,
+    )
+    try:
+        config = load_security_config()
+    except TirithConfigurationError:
+        return configuration_error_result()
+    if not config["tirith_enabled"]:
+        return {"action": "allow", "findings": [], "summary": ""}
+    fail_open = config["tirith_fail_open"]
     try:
         from tools.tirith_security import check_command_security
-        return check_command_security(command)
+        return check_command_security(command, _config=config)
     except ImportError:
-        from tools.tirith_config import TirithConfigurationError, configuration_error_result
-        try:
-            fail_open = _tirith_fail_open()
-        except TirithConfigurationError:
-            return configuration_error_result()
         if fail_open:
             return {"action": "allow", "findings": [], "summary": ""}
         return {"action": "warn", "summary": "Tirith unavailable (fail-closed)", "findings": [{
@@ -1245,8 +1250,6 @@ def check_all_command_guards(command: str, env_type: str,
         return _approved()
 
     approval_callback, is_cli, is_gateway, is_ask = _presence(approval_callback)
-    # Outside CLI/gateway/ask flows we never block on approvals: each
-    # unattended context applies its configured deny/approve mode, else allow.
     if not is_cli and not is_gateway and not is_ask:
         for ctx in _unattended_contexts():
             result = _unattended_deny(command, ctx)
@@ -1254,8 +1257,6 @@ def check_all_command_guards(command: str, env_type: str,
                 return result
         return _approved()
 
-    # Gather findings: warnings = [(pattern_key, description, is_tirith)]. Tirith block AND warn both go through the
-    # approval flow (block used to be a hard stop) so users can inspect the findings and approve.
     tirith_result = _tirith_scan(command)
     # A missing policy cannot be approved or cached as an ordinary scan finding.
     if tirith_result.get("configuration_error"):

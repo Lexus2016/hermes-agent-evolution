@@ -18,15 +18,15 @@ import/patch target): ``terminal_tool_config`` (TERMINAL_* reads, ``_quiet``),
 ``terminal_tool_result`` (foreground result post-processing).
 """
 
-import json
-import logging
-import os
-import sys
-import time
-import threading
 import atexit
 import hashlib
+import json
+import logging
+import os, sys, time
 import re
+import shlex
+import shutil
+import threading
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 

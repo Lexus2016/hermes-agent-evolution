@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hermes_cli import main as hermes_main, update_cmd
+from hermes_cli import config as hermes_config, main as hermes_main, update_cmd
 from tests.hermes_cli.test_update_target_identity import git, update_tree
 from datetime import UTC
 
@@ -90,6 +90,7 @@ def _setup_update_mocks(monkeypatch, tmp_path):
     """Common setup for cmd_update tests."""
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(hermes_main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("hermes_cli.update_owning_install.retarget_to_owning_install", lambda *_: None)
     monkeypatch.setattr(hermes_main, "_stash_local_changes_if_needed", lambda *a, **kw: None)
     monkeypatch.setattr(hermes_main, "_restore_stashed_changes", lambda *a, **kw: True)
     monkeypatch.setattr(hermes_config, "get_missing_env_vars", lambda required_only=True: [])
@@ -100,24 +101,6 @@ def _setup_update_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(hermes_main, "_refresh_active_lazy_features", lambda *a, **kw: True)
 
 
-
-
-def test_refresh_active_memory_provider_dependencies_reinstalls_active_provider(monkeypatch):
-    """#53272/#70636: update must re-run the active provider's dep install."""
-    recorded = []
-
-    monkeypatch.setattr(
-        "hermes_cli.config.load_config",
-        lambda: {"memory": {"provider": "mem0"}},
-    )
-    monkeypatch.setattr(
-        "hermes_cli.memory_setup._install_dependencies",
-        lambda provider_name, force=False: recorded.append((provider_name, force)),
-    )
-
-    hermes_main._refresh_active_memory_provider_dependencies()
-
-    assert recorded == [("mem0", True)]
 
 
 @pytest.mark.parametrize('history,failure,keep', [

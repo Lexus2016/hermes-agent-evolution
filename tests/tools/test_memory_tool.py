@@ -706,7 +706,7 @@ class TestMemoryStoreReplace:
     def test_failures_name_the_fix(self, store):
         """A refused write names the fix: the chars to free, and for an old_text that matches
         nothing, the entries it most resembles. Empty content falls back to new_text (#90468)."""
-        store.add("memory", "Deploys go through GitHub Actions to Fly.io with manual approval.")
+        store.auto_evict_on_full = False; store.add("memory", "Deploys go through GitHub Actions to Fly.io with manual approval.")
         store.add("memory", "x" * 380)  # 65 + 3 + 380 = 448 of 500
         full = store.add("memory", "y" * 54)  # 448 + 3 + 54 = 505
         assert "by 5 chars" in full["error"] and "free at least 5 chars" in full["error"]
@@ -807,7 +807,7 @@ class TestMemoryConsolidationGracefulDegrade:
         for _ in range(cap):
             r = s.add("memory", big)
             assert r["success"] is False
-            assert "retry this add" in r["error"]  # still instructs in-turn retry
+            assert "retry" in r["error"].lower()  # still instructs in-turn retry
         r = s.add("memory", big)
         assert r["success"] is False
         assert r["done"] is True

@@ -111,7 +111,7 @@ def fake_clock(monkeypatch):
 
 @pytest.mark.platforms("linux")
 class TestPulseSocketReachable:
-    def test_stale_socket_file_not_reachable(self, monkeypatch):
+    def test_stale_socket_file_not_reachable(self, monkeypatch, tmp_path):
         """A socket file with no listener should not count as reachable."""
         import socket as _socket
         runtime_dir = tmp_path.parent / "pulse-stale"
