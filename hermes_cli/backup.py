@@ -1314,7 +1314,7 @@ def _create_quick_snapshot_locked(
     # Skip when a DB failed to capture OR was skipped for size (#68805): the snapshot is
     # incomplete and the older one may hold the only recoverable database.
     if not (failed_dbs or oversized_skipped):
-        _prune_oldest(_snapshot_dirs(root), _QUICK_DEFAULT_KEEP if keep is None else keep, shutil.rmtree, "snapshot")
+        _prune_quick_snapshots(root, keep=_QUICK_DEFAULT_KEEP if keep is None else keep)
     else:
         if oversized_skipped:
             print("  ⚠ Skipping snapshot prune: DB file(s) skipped for size: " + ", ".join(oversized_skipped))

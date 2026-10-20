@@ -64,6 +64,8 @@ def _pm_environment_owner(venv: Path) -> Path | None:
 
 def retarget_to_owning_install(project_root: Path) -> None:
     """Re-run this command with the owning install's code; returns only when nothing is redirected."""
+    if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
+        return
     owner = owning_install_root(project_root)
     if owner is None:
         return

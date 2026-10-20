@@ -2654,12 +2654,6 @@ def init_agent(
         gateway_session_key
         or getattr(agent, "_gateway_session_key", None)
     )
-    agent._session_json_enabled = False
-    with suppress(Exception):
-        _sess_cfg = _cfg_dict(_agent_cfg, "sessions")
-        agent._session_json_enabled = bool(_sess_cfg.get("write_json_snapshots", False))
-    agent._history_repaired_count = 0
-
 
     # Load config once for memory, skills, and compression sections
     try:
@@ -2667,6 +2661,12 @@ def init_agent(
         _agent_cfg = _load_agent_config()
     except Exception:
         _agent_cfg = {}
+
+    agent._session_json_enabled = False
+    with suppress(Exception):
+        _sess_cfg = _cfg_dict(_agent_cfg, "sessions")
+        agent._session_json_enabled = bool(_sess_cfg.get("write_json_snapshots", False))
+    agent._history_repaired_count = 0
 
     _apply_display_config(agent, _agent_cfg, platform)
     _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=memory_manager)

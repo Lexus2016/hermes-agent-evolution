@@ -1972,16 +1972,14 @@ class TestTirithImportErrorFailOpenPolicy:
 
         assert result.get("approved") is True
 
-    def test_fail_open_false_escalates_to_approval_on_import_error(self):
+    def test_fail_open_false_escalates_to_approval_on_import_error(self, monkeypatch):
         """Fail-closed: ImportError must NOT silently allow when tirith_fail_open=false."""
         import builtins
         from unittest.mock import patch as _patch
         from tools.approval import check_all_command_guards
 
-        cfg = {
-            "approvals": {"mode": "manual"},
-            "security": {"tirith_enabled": True, "tirith_fail_open": False},
-        }
+        monkeypatch.delenv("TIRITH_ENABLED", raising=False)
+        cfg = {"approvals": {"mode": "manual"}, "security": {"tirith_enabled": True, "tirith_fail_open": False}}
         calls = []
 
         def approval_callback(command, description, **kwargs):

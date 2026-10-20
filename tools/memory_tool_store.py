@@ -47,6 +47,11 @@ MEMORY_BLOCK_HEADERS = {
 
 ENTRY_DELIMITER = "\n§\n"
 
+# Sentinel from ``_reload_target``: the file EXISTS but could not be read.
+# Distinct from a drift-backup path (str) and a clean reload (None); the caller
+# must abort rather than persist over an unreadable file.
+_READ_FAILED = object()
+
 # Sidecar recording threat-blocked memory entries we have already warned about.
 # Keyed by "<filename>|<sha256(entry)>" so a poisoned-on-disk entry warns ONCE
 # per unique text, not once per session start (#138). The raw entry
@@ -318,7 +323,7 @@ def _no_match_error(entries: list[str], old_text: str, verb: str, **extra) -> di
 
 
 def _over_limit(new_total: int, limit: int) -> str:
-    return f"would put memory at {new_total:,}/{limit:,} chars: free at least {new_total - limit:,} chars"
+    return f"would exceed the limit ({new_total:,}/{limit:,} chars: free at least {new_total - limit:,} chars)"
 
 
 # Patch content cannot be empty, and 'remove' would drop the sibling facts in the entry.
@@ -588,7 +593,7 @@ class MemoryStore:
                 sanitized.append(
                     f"[BLOCKED: {filename} entry contained threat pattern(s): "
                     f"{', '.join(findings)}. Removed from system prompt; "
-                    f"use memory(action=remove) "
+                    f"use memory(action=remove, target='{_store_target(filename)}') "
                     f"to delete the original.]"
                 )
             else:
@@ -834,21 +839,49 @@ class MemoryStore:
                 return None
             evicted.append(parse_provenance(working.pop(0))[0])
 
-    def _failure_with_entries(self, target: str, message: str) -> dict[str, Any]:
+    def _failure_with_entries(self, target: str, message: str, *,
+                              current_size: Optional[int] = None,
+                              max_size: Optional[int] = None,
+                              would_be_size: Optional[int] = None,
+                              **extra) -> dict[str, Any]:
         """Over-budget consolidation failure carrying the live entries so the model can consolidate."""
+        payload = {
+            "current_entries": self._entries_for(target),
+            "usage": self._usage(target),
+            "current_size": current_size if current_size is not None else self._char_count(target),
+            "max_size": max_size if max_size is not None else self._char_limit(target),
+        }
+        if would_be_size is not None:
+            payload["would_be_size"] = would_be_size
+        payload.update(extra)
         return self._consolidation_failure(
-            _error(message, "over_budget", current_entries=self._entries_for(target), usage=self._usage(target)))
+            _error(message, "over_budget", **payload))
 
     def _batch_failure(self, target: str, message: str, failure_class: str,
-                       closest_entries: Optional[list[str]] = None) -> dict[str, Any]:
+                       closest_entries: Optional[list[str]] = None, *,
+                       current_size: Optional[int] = None,
+                       max_size: Optional[int] = None,
+                       would_be_size: Optional[int] = None,
+                       **extra) -> dict[str, Any]:
         """Batch-abort failure WITHOUT ``current_entries``: the store did not change and the
         caller already holds the inventory, so echoing it made each consolidation retry
         grow the context it was invoked to shrink (#97316). A zero-match op carries only
         its few ``closest_entries``."""
+        payload = {
+            "usage": self._usage(target),
+        }
+        if closest_entries:
+            payload["closest_entries"] = closest_entries
+        if current_size is not None:
+            payload["current_size"] = current_size
+        if max_size is not None:
+            payload["max_size"] = max_size
+        if would_be_size is not None:
+            payload["would_be_size"] = would_be_size
+        payload.update(extra)
         return self._consolidation_failure(
             _error(message + " No operations were applied (batch is all-or-nothing).", failure_class,
-                   usage=self._usage(target),
-                   **({"closest_entries": closest_entries} if closest_entries else {})))
+                   **payload))
 
     def _mutate(self, target: str, mutate, *, skip_drift: bool = False, limit_override: Optional[int] = None) -> dict[str, Any]:
         """Lock, re-read from disk, run ``mutate(entries, limit)`` -> ``(new_entries, message)``
@@ -1025,13 +1058,14 @@ class MemoryStore:
                     for _ in evicted:
                         working.pop(0)
                     working.append(stored)
-                    extra = {"evicted_entries": evicted} if evicted else {}
+                    extra = {"evicted": evicted, "evicted_entries": evicted} if evicted else {}
                     return working, "Entry added.", extra
                 return self._failure_with_entries(target, (
                     f"Memory at {self._char_count(target):,}/{limit:,} chars; adding this entry ({len(content)} chars) "
                     f"would exceed the limit by {new_total - limit:,} chars. Retry as ONE 'operations' batch that "
                     f"removes or shortens (patch) stale entries from current_entries below to free at least "
-                    f"{new_total - limit:,} chars AND adds this entry — the limit is checked only on the batch result."))
+                    f"{new_total - limit:,} chars AND adds this entry — the limit is checked only on the batch result."),
+                    would_be_size=new_total, max_size=limit)
             return candidate, "Entry added."
 
         return self._mutate(target, _add, skip_drift=True)
@@ -1100,7 +1134,8 @@ class MemoryStore:
                 return self._failure_with_entries(target, (
                     f"Patch would put memory at {new_total:,}/{limit:,} chars. Shorten the new "
                     f"text, or 'remove' other stale or less important entries to make room "
-                    f"(see current_entries below), then retry — all in this turn."))
+                    f"(see current_entries below), then retry — all in this turn."),
+                    would_be_size=new_total, max_size=limit)
             return patched, "Entry patched.", {
                 "patched_entry_before": before, "patched_entry_after": after}
         return self._mutate(target, _apply)
@@ -1337,7 +1372,8 @@ class MemoryStore:
                 return self._failure_with_entries(target, (
                     f"Replacement {_over_limit(new_total, limit)}. Shorten the new content, or retry as ONE "
                     f"'operations' batch with this replace plus removes/shortenings of other stale entries "
-                    f"(see current_entries below) — the limit is checked only on the batch result."))
+                    f"(see current_entries below) — the limit is checked only on the batch result."),
+                    would_be_size=new_total, max_size=limit)
             return replaced, "Entry replaced.", {"replaced_entry": entries[idx]}
         return self._mutate(target, _apply)
 
@@ -1450,7 +1486,10 @@ class MemoryStore:
                 return self._batch_failure(target, (
                     f"Applying all {len(operations)} operations {_over_limit(new_total, limit)} more. Add "
                     f"removes or shortening patches of other stale entries to the same batch, then retry."),
-                    "over_budget")
+                    "over_budget",
+                    current_size=self._char_count(target),
+                    max_size=limit,
+                    would_be_size=new_total)
             if not commit:
                 return {"success": True, "matched_entries": matched}
             # op index -> full entry text its replace/remove selected (#117952), 1-based to
@@ -1588,6 +1627,7 @@ class MemoryStore:
         """Atomic temp-file + rename: readers never see a truncated file. Callers
         hold ``_file_lock`` (via ``_mutate``): a bare write from an earlier snapshot
         drops concurrent entries (#119668)."""
+        content = ENTRY_DELIMITER.join(entries)
         try:
             atomic_write_text(path, content, tmp_prefix=".mem_")
         except (OSError, IOError) as e:
@@ -1631,6 +1671,7 @@ def load_on_disk_store() -> "MemoryStore":
     allow_batch_override = False
     try:
         from hermes_cli.config import load_config
+        from tools.memory_tool import get_builtin_memory_config, get_builtin_memory_store_flags
 
         config = load_config() or {}
         mem_cfg = get_builtin_memory_config(config)

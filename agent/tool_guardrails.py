@@ -213,27 +213,70 @@ def is_stall_guard_repeatable(tool_name: str) -> bool:
     return tool_name in STALL_GUARD_REPEATABLE_TOOLS or tool_name.endswith(_STALL_GUARD_REPEATABLE_SUFFIXES)
 
 
-def _is_non_interactive_platform(platform: str | None) -> bool:
-    """True for gateway/cron sessions where tool loops are unattended."""
-    if not isinstance(platform, str) or not platform.strip():
-        return False
-    return platform.strip().lower() not in _ATTENDED_PLATFORMS
+# Default session-wide caps, matching Claude Code's v2.1.212 runaway-loop
+# Per-turn (per-agent-loop) caps on runaway-prone tool calls. Counts reset at
+# the start of every agent loop (reset_for_turn), so the limit is "within a
+# single turn" rather than cumulative over the whole session. A single loop
+# issuing dozens of web searches or spawning dozens of subagents is already
+# pathological, so the defaults are deliberately low.
+_DEFAULT_MAX_WEB_SEARCHES_PER_TURN = 50
+_DEFAULT_MAX_SUBAGENTS_PER_TURN = 50
 
 
 @dataclass(frozen=True)
 class LoopCapConfig:
-    """Per-turn hard ceilings on web_search calls / subagent spawns; count total calls (not
-    repeats), fire regardless of ``hard_stop_enabled``; ``0`` disables a cap."""
+    """Per-turn caps on runaway-prone tool calls.
+
+    Inspired by Claude Code v2.1.212 (Week 29, July 2026), which added caps on
+    WebSearch calls and subagent spawns to stop runaway search / delegation
+    loops. Here the caps count *within a single agent loop* (one turn): the
+    counters reset in ``reset_for_turn`` at the start of every
+    ``run_conversation``, so a legitimate multi-turn session is never starved,
+    but a single turn that spirals into an unbounded search / delegation loop
+    is stopped.
+
+    Semantics differ from the per-turn loop *detector* above (which keys on
+    repeated identical/failing calls): these caps are a hard ceiling on the
+    total count of a tool within the turn and fire regardless of
+    ``hard_stop_enabled``. A value of ``0`` disables the cap (unlimited).
+    """
 
     max_web_searches: int = _DEFAULT_MAX_WEB_SEARCHES_PER_TURN
     max_subagents: int = _DEFAULT_MAX_SUBAGENTS_PER_TURN
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> LoopCapConfig:
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "LoopCapConfig":
         """Build config from the ``tool_loop_guardrails.loop_caps`` section."""
         if not isinstance(data, Mapping):
             return cls()
-        return cls(**{f.name: _int_at_least(data.get(f.name), f.default, 0) for f in fields(cls)})
+        defaults = cls()
+        return cls(
+            max_web_searches=_non_negative_int(
+                data.get("max_web_searches"), defaults.max_web_searches
+            ),
+            max_subagents=_non_negative_int(
+                data.get("max_subagents"), defaults.max_subagents
+            ),
+        )
+
+
+_INTERACTIVE_PLATFORMS = frozenset({"cli", "tui", "desktop", "acp"})
+
+# Platforms that are not chat gateways but whose work is a bounded, supervised
+# task loop: a subagent inherits its parent's budget and is stopped by the
+# parent; api_server runs have a live client holding the request. Both do
+# real edit -> re-run work, so they keep the interactive (warn-only) default.
+_SUPERVISED_TASK_PLATFORMS = frozenset({"subagent", "api_server"})
+
+
+def _is_non_interactive_platform(platform: str | None) -> bool:
+    """Return true for gateway/cron sessions where tool loops are unattended."""
+    if not isinstance(platform, str) or not platform.strip():
+        return False
+    key = platform.strip().lower()
+    if key in _INTERACTIVE_PLATFORMS or key in _SUPERVISED_TASK_PLATFORMS:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -369,72 +412,6 @@ class ToolCallGuardrailConfig:
             ),
             loop_caps=LoopCapConfig.from_mapping(data.get("loop_caps")),
         )
-
-
-# Default session-wide caps, matching Claude Code's v2.1.212 runaway-loop
-# Per-turn (per-agent-loop) caps on runaway-prone tool calls. Counts reset at
-# the start of every agent loop (reset_for_turn), so the limit is "within a
-# single turn" rather than cumulative over the whole session. A single loop
-# issuing dozens of web searches or spawning dozens of subagents is already
-# pathological, so the defaults are deliberately low.
-_DEFAULT_MAX_WEB_SEARCHES_PER_TURN = 50
-_DEFAULT_MAX_SUBAGENTS_PER_TURN = 50
-
-
-@dataclass(frozen=True)
-class LoopCapConfig:
-    """Per-turn caps on runaway-prone tool calls.
-
-    Inspired by Claude Code v2.1.212 (Week 29, July 2026), which added caps on
-    WebSearch calls and subagent spawns to stop runaway search / delegation
-    loops. Here the caps count *within a single agent loop* (one turn): the
-    counters reset in ``reset_for_turn`` at the start of every
-    ``run_conversation``, so a legitimate multi-turn session is never starved,
-    but a single turn that spirals into an unbounded search / delegation loop
-    is stopped.
-
-    Semantics differ from the per-turn loop *detector* above (which keys on
-    repeated identical/failing calls): these caps are a hard ceiling on the
-    total count of a tool within the turn and fire regardless of
-    ``hard_stop_enabled``. A value of ``0`` disables the cap (unlimited).
-    """
-
-    max_web_searches: int = _DEFAULT_MAX_WEB_SEARCHES_PER_TURN
-    max_subagents: int = _DEFAULT_MAX_SUBAGENTS_PER_TURN
-
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "LoopCapConfig":
-        """Build config from the ``tool_loop_guardrails.loop_caps`` section."""
-        if not isinstance(data, Mapping):
-            return cls()
-        defaults = cls()
-        return cls(
-            max_web_searches=_non_negative_int(
-                data.get("max_web_searches"), defaults.max_web_searches
-            ),
-            max_subagents=_non_negative_int(
-                data.get("max_subagents"), defaults.max_subagents
-            ),
-        )
-
-
-_INTERACTIVE_PLATFORMS = frozenset({"cli", "tui", "desktop", "acp"})
-
-# Platforms that are not chat gateways but whose work is a bounded, supervised
-# task loop: a subagent inherits its parent's budget and is stopped by the
-# parent; api_server runs have a live client holding the request. Both do
-# real edit -> re-run work, so they keep the interactive (warn-only) default.
-_SUPERVISED_TASK_PLATFORMS = frozenset({"subagent", "api_server"})
-
-
-def _is_non_interactive_platform(platform: str | None) -> bool:
-    """Return true for gateway/cron sessions where tool loops are unattended."""
-    if not isinstance(platform, str) or not platform.strip():
-        return False
-    key = platform.strip().lower()
-    if key in _INTERACTIVE_PLATFORMS or key in _SUPERVISED_TASK_PLATFORMS:
-        return False
-    return True
 
 
 @dataclass(frozen=True)
@@ -1673,6 +1650,21 @@ def _without_execute_code_metadata(parsed: Any) -> Any:
     if isinstance(kernel, dict):
         cleaned["kernel"] = {k: v for k, v in kernel.items() if k != "execution_count"}
     return cleaned
+
+
+def _canonical_json(value: Any) -> str:
+    """Return sorted compact JSON for parsed tool output."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _ordinal(count: int) -> str:
+    return f"{count}{'th' if 11 <= count % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(count % 10, 'th')}"
 
 
 def _result_hash(result: str | None, tool_name: str = "") -> str:

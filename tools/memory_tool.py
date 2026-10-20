@@ -414,6 +414,31 @@ def memory_tool(
     return result
 
 
+def _handle_operations_batch(
+    store: MemoryStore,
+    target: str,
+    operations: Any,
+    source_class: str,
+    trust_tier: str,
+    memory_char_limit: Optional[int],
+) -> tuple[str, str]:
+    if not isinstance(operations, list):
+        return _invalid("operations must be a list of {action, content?, old_text?} objects.")
+    if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
+        return _invalid(_REPLACE_REMOVED)
+    gate_result = _apply_write_gate(
+        store, "batch", target, None, None, operations,
+        source_class=source_class, trust_tier=trust_tier,
+    )
+    if gate_result is not None:
+        return "rejected", gate_result
+    try:
+        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
+    except Exception as exc:  # health: allow BLE001 -- deliberate boundary returning formatted memory error
+        return "failed", _memory_enriched_error(exc, "batch")
+    return _applied(result)
+
+
 def _memory_tool(
     action: Optional[str],
     target: Optional[str],
@@ -474,27 +499,20 @@ def _memory_tool(
         return _applied(result)
 
     if operations:
-        if not isinstance(operations, list):
-            return _invalid("operations must be a list of {action, content?, old_text?} objects.")
-        gate_result = _apply_write_gate(
-            store, "batch", target, None, None, operations,
-            source_class=source_class, trust_tier=trust_tier,
+        return _handle_operations_batch(
+            store, target, operations, source_class, trust_tier, memory_char_limit
         )
-        if gate_result is not None:
-            return "rejected", gate_result
-        try:
-            result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
-        except Exception as exc:
-            return "failed", _memory_enriched_error(exc, "batch")
-        return _applied(result)
 
     if not action and not operations:
         return _invalid(
-            "Missing required parameter: provide 'action' (add/patch/replace/remove) "
+            "Missing required parameter: provide 'action' (add/patch/remove) "
             "or 'operations' (batch list). Got neither."
         )
 
-    if action in ("add", "replace", "patch", "remove"):
+    if action == "replace":
+        return _invalid(_REPLACE_REMOVED)
+
+    if action in ("add", "patch", "remove"):
         invalid = _validate_single_op(store, action, target, content, old_text)
         if invalid is not None:
             return "rejected", invalid
