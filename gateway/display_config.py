@@ -1,32 +1,29 @@
 """Per-platform display/verbosity resolver (``resolve_display_setting``).
 
-Provides ``resolve_display_setting()`` — the single entry-point for reading
-display settings with platform-specific overrides and sensible defaults.
-
 Resolution order (first non-None wins):
     0. ``display.chat_overrides.<chat_id>`` / ``display.quiet_chats``
                                                — per-chat verbosity override
                                                (only when a ``chat_id`` is passed)
     1. ``display.platforms.<platform>.<key>``  — explicit per-platform user override
     2. ``display.<key>``                       — global user setting
-    3. ``_PLATFORM_DEFAULTS[<platform>][<key>]``  — built-in sensible default
+    3. ``_PLATFORM_DEFAULTS[<platform>][<key>]``  — built-in sensible default (or plugin's ``display_tier``)
     4. ``_GLOBAL_DEFAULTS[<key>]``              — built-in global default
 
 Per-chat overrides (step 0) let a single platform mix verbosity per chat/topic:
 a customer-facing group can run ``mode: quiet`` (final answer only) while a DM
-runs ``mode: verbose`` (full tool/reasoning detail).  A chat entry may set a
+runs ``mode: verbose`` (full tool/reasoning detail). A chat entry may set a
 shorthand ``mode`` preset and/or individual setting keys (explicit keys win over
-the preset).  ``display.quiet_chats`` is a convenience list of chat ids that
-implies ``mode: quiet``.  Step 0 is inert unless the caller passes a ``chat_id``
+the preset). ``display.quiet_chats`` is a convenience list of chat ids that
+implies ``mode: quiet``. Step 0 is inert unless the caller passes a ``chat_id``
 — every existing call site omits it, so their resolution is byte-for-byte
 unchanged.
 
-Exception: ``display.streaming`` is CLI-only.  Gateway streaming follows the
+Exception: ``display.streaming`` is CLI-only. Gateway streaming follows the
 top-level ``streaming`` config unless ``display.platforms.<platform>.streaming``
 sets an explicit per-platform override.
 
 Backward compatibility: ``display.tool_progress_overrides`` is still read as a
-fallback for ``tool_progress`` when no ``display.platforms`` entry exists.  A
+fallback for ``tool_progress`` when no ``display.platforms`` entry exists. A
 config migration (version bump) automatically moves the old format into the new
 ``display.platforms`` structure.
 """
@@ -95,9 +92,24 @@ _PLATFORM_DEFAULTS: dict[str, dict[str, Any]] = {
     "email": _TIER_MINIMAL,
     "sms": _TIER_MINIMAL,
     "webhook": _TIER_MINIMAL,
-    "homeassistant": _TIER_MINIMAL,
     "api_server": {**_TIER_HIGH, "tool_preview_length": 0},
 }
+
+_TIERS = {"high": _TIER_HIGH, "medium": _TIER_MEDIUM, "low": _TIER_LOW, "minimal": _TIER_MINIMAL}
+
+
+def _platform_defaults(platform_key: str) -> dict[str, Any]:
+    """Built-in defaults for *platform_key*: the table above, else the ``display_tier`` a plugin
+    platform registered (``PlatformEntry.display_tier``)."""
+    if platform_key in _PLATFORM_DEFAULTS:
+        return _PLATFORM_DEFAULTS[platform_key]
+    try:
+        from gateway.platform_registry import platform_registry
+        entry = platform_registry.get(platform_key)
+    except Exception:
+        return {}
+    return _TIERS.get(str(getattr(entry, "display_tier", "") or "").lower(), {})
+
 
 # Canonical set of per-platform overrideable keys (for validation).
 OVERRIDEABLE_KEYS = frozenset(_GLOBAL_DEFAULTS.keys())
@@ -256,7 +268,7 @@ def resolve_display_setting(
     configured = _configured_display_value(user_config, platform_key, setting)
     if configured is not None:
         return _normalise(setting, configured)
-    val = _PLATFORM_DEFAULTS.get(platform_key, {}).get(setting)
+    val = _platform_defaults(platform_key).get(setting)
     if val is None:
         val = _GLOBAL_DEFAULTS.get(setting)
     return fallback if val is None else val

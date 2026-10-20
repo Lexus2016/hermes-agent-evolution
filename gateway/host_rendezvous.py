@@ -15,17 +15,19 @@ which scopes to the **OS user**. That is the correct granularity: separate OS us
 separate ``$HOME``s, separate ``~/.hermes`` profile roots, separate ports-by-convention and
 separate credentials, so "one per host" means "one per host per OS user".
 
-**Staleness is proved, never assumed.** A record carries ``(pid, createTime)``; a record whose
-PID is dead, or whose PID is alive with a different process creation time (PID reuse), is
-STALE and is ignored — an attaching client must never dial a recycled PID's port.
+**Staleness is proved, never assumed.** New records pair the PID with the repository's stable
+process-start fingerprint (boot-relative on Linux/WSL); ``createTime`` remains the legacy fallback.
+A dead PID or a mismatched process incarnation is STALE and ignored — an attaching client must
+never dial a recycled PID's port.
 
 **Relationship to ``spawn-ledger.json``** (``hermes_cli/process_identity.py``): the ledger stays
 the append-only machine roster of every long-lived Hermes process (Desktop's attach ladder reads
 it) and is still written unchanged. It cannot be the host record: it has no lock, no
 single-writer semantics, no removal on exit, and no place to publish a protocol version or
 an authentication handle. The record here is authoritative for "who owns this host role"; the
-ledger remains authoritative for "what is running". Both are written, and this module reuses the
-ledger's ``(pid, create_time)`` liveness proof rather than inventing a second one.
+ledger remains authoritative for "what is running". Both are written. New host records pair the
+ledger's live-PID proof with ``gateway.status``'s canonical process-start fingerprint; legacy
+records without that fingerprint keep the old ``(pid, create_time)`` proof.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ import os
 import stat
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -97,6 +99,16 @@ class HostRecord:
     #: WITHOUT a protocol bump on purpose, because a bump would make every live owner's record read
     #: as stale and a second gateway would start.
     home: str = ""
+    #: Stable process-start fingerprint. On Linux/WSL this is boot-relative /proc start ticks,
+    #: so a wall-clock resync cannot make a live owner look like a recycled PID. Optional for
+    #: records written by older Hermes versions, which still fall back to create_time.
+    #: NOT unique across reboots — pair it with ``boot_epoch``.
+    start_time: Optional[int] = None
+    #: Instantiation epoch (boot id + PID 1 start). Distinguishes a pre-reboot owner from an
+    #: early-boot process that reused its PID and landed inside the start-tick drift tolerance.
+    #: Absent on older records; added WITHOUT a protocol bump, because a bump would make every
+    #: live owner's record read as stale and a second gateway would start.
+    boot_epoch: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -104,6 +116,8 @@ class HostRecord:
             "home": self.home,
             "pid": self.pid,
             "createTime": self.create_time,
+            "startTime": self.start_time,
+            "bootEpoch": self.boot_epoch,
             "host": self.host,
             "port": self.port,
             "protocolVersion": self.protocol_version,
@@ -113,7 +127,7 @@ class HostRecord:
         }
 
     @classmethod
-    def from_json(cls, payload: Any) -> Optional["HostRecord"]:
+    def from_json(cls, payload: Any) -> Optional[HostRecord]:
         if not isinstance(payload, dict):
             return None
         pid = payload.get("pid")
@@ -121,6 +135,7 @@ class HostRecord:
         if not isinstance(pid, int) or pid <= 0 or role not in _ROLES:
             return None
         create = payload.get("createTime")
+        start = payload.get("startTime")
         port = payload.get("port")
         profiles = payload.get("profiles")
         version = payload.get("protocolVersion")
@@ -128,6 +143,12 @@ class HostRecord:
             role=role,
             pid=pid,
             create_time=float(create) if isinstance(create, (int, float)) else None,
+            start_time=(
+                int(start)
+                if isinstance(start, int) and not isinstance(start, bool) and start > 0
+                else None
+            ),
+            boot_epoch=str(payload.get("bootEpoch") or ""),
             host=str(payload.get("host") or ""),
             port=int(port) if isinstance(port, int) and 0 < port <= 65535 else None,
             protocol_version=version if isinstance(version, int) else 0,
@@ -223,6 +244,103 @@ def _pid_incarnation_matches(pid: int, create_time: Optional[float]) -> Optional
     return _pid_alive_matches(pid, create_time)
 
 
+# A record published before ``bootEpoch`` existed cannot name its boot. Its ``createTime`` older
+# than this boot's start (``psutil.boot_time()``, minus this slack) means EITHER a reboot (the
+# owner is gone and its PID was recycled) OR a wall-clock step since the owner started (boot time
+# is wall clock minus uptime, so a forward step moves it past a running owner's saved start;
+# #117505). Clocks cannot tell those apart, so the host lock decides: a live gateway holds it.
+_LEGACY_BOOT_SLACK_S = 120.0
+
+
+def _boot_time() -> Optional[float]:
+    try:
+        import psutil
+
+        return float(psutil.boot_time())
+    except Exception:
+        logger.debug("boot time unreadable; legacy record age check skipped", exc_info=True)
+        return None
+
+
+def _host_lock_is_free(role: str) -> Optional[bool]:
+    """True when no process holds the host lock for ``role``; ``None`` when it cannot be probed.
+
+    Read-only callers (status, dashboard) reach this, so it never creates the lock dir or file: a
+    missing lock file means nobody holds the lock. The probe takes the lock for an instant, so a
+    gateway claiming it in that instant gets HELD_BY_OTHER and its supervisor retries.
+    """
+    if owns_host_lock(role):
+        return False
+    from gateway.status import _probe_lock_file
+
+    try:
+        fd = os.open(str(lock_path(role)), os.O_RDWR)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        logger.debug("host %s lock could not be probed", role, exc_info=True)
+        return None
+    return not _probe_lock_file(os.fdopen(fd, "r+", encoding="utf-8"))
+
+
+def _current_boot_epoch() -> str:
+    """Identity of this boot. Empty when /proc is unreadable — a recorded epoch is then unprovable."""
+    try:
+        from gateway.drain_control import current_instantiation_epoch
+
+        return current_instantiation_epoch() or ""
+    except Exception:
+        logger.debug("boot epoch unreadable; host liveness will not use it", exc_info=True)
+        return ""
+
+
+def _record_incarnation_matches(record: HostRecord) -> Optional[bool]:
+    """Whether the record still names the same live process incarnation.
+
+    New records prefer the canonical start fingerprint: on Linux/WSL it comes from /proc start
+    ticks and is immune to wall-clock shifts that move psutil.create_time(). Those ticks are
+    NOT unique across reboots — they reset, and an early-boot PID reused within the drift
+    tolerance looks like the dead owner. A published boot epoch that differs from this boot's is a
+    mismatch; one that cannot be compared (this boot's epoch is unreadable) is unprovable, ``None``.
+
+    A gateway record with no epoch (published before ``bootEpoch`` existed, or on any platform
+    without /proc, where the epoch is always empty) whose create_time predates this boot is a
+    mismatch only while nobody holds the host lock. A record with neither create_time nor
+    start_time proves nothing about its pid, so it never vouches for one. Legacy records without
+    a start fingerprint keep the create-time check. Do not infer identity from argv.
+    """
+    recorded_epoch = record.boot_epoch
+    epoch = _current_boot_epoch()
+    if recorded_epoch:
+        if not epoch:
+            return None  # boots can't be compared; matching ticks alone prove nothing
+        if recorded_epoch != epoch:
+            return False
+    if record.start_time is None and record.create_time is None:
+        return False
+    if record.start_time is None:
+        matched = _pid_incarnation_matches(record.pid, record.create_time)
+    else:
+        alive = _pid_incarnation_matches(record.pid, None)
+        if alive is not True:
+            return alive
+        from gateway.status import get_process_start_time, start_time_fingerprints_match
+
+        current = get_process_start_time(record.pid)
+        matched = None if current is None else start_time_fingerprints_match(record.start_time, current)
+    if matched is not True:
+        return matched
+    if record.role == ROLE_GATEWAY and not recorded_epoch and record.create_time is not None:
+        boot = _boot_time()
+        if boot is not None and record.create_time < boot - _LEGACY_BOOT_SLACK_S:
+            lock_free = _host_lock_is_free(record.role)
+            if lock_free is None:
+                return None
+            if lock_free:
+                return False
+    return True
+
+
 def record_is_stale(record: Optional[HostRecord]) -> bool:
     """A record nobody may attach to: absent, unknown protocol, dead PID, or PID reuse.
 
@@ -237,12 +355,12 @@ def record_is_stale(record: Optional[HostRecord]) -> bool:
         return True
     if record.protocol_version != HOST_PROTOCOL_VERSION:
         return True
-    return _pid_incarnation_matches(record.pid, record.create_time) is False
+    return _record_incarnation_matches(record) is False
 
 
 def liveness_is_proven(record: HostRecord) -> bool:
-    """True only when the PID+createTime probe positively matched (never on ``None``)."""
-    return _pid_incarnation_matches(record.pid, record.create_time) is True
+    """True only when the record's process-incarnation probe positively matched (never on ``None``)."""
+    return _record_incarnation_matches(record) is True
 
 
 def dial_host(record: HostRecord) -> str:
@@ -280,7 +398,7 @@ def probe_owner(record: HostRecord, *, timeout: float = PROBE_TIMEOUT_S) -> Opti
     request = urllib.request.Request(
         f"http://{host}:{record.port}{HOST_IDENTITY_PATH}", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 — fixed http scheme
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 return None
             payload = json.loads(response.read(65536).decode("utf-8", "replace"))
@@ -300,7 +418,7 @@ def read_record(role: str, *, include_stale: bool = False) -> Optional[HostRecor
     if not _record_is_own(path):
         return None
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
     try:
@@ -322,7 +440,7 @@ def read_token(role: str) -> str:
     of, same-OS-user authority — the authority boundary the host lock is scoped to.
     """
     try:
-        return token_path(role).read_text(encoding="utf-8").strip()
+        return token_path(role).read_text(encoding="utf-8-sig").strip()
     except (OSError, UnicodeDecodeError):
         return ""
 
@@ -447,16 +565,20 @@ def publish_record(
     control socket.
     """
     role = _validated_role(role)
+    from gateway.status import get_process_start_time
+
     record = HostRecord(
         role=role,
         pid=os.getpid(),
         create_time=process_create_time(),
+        start_time=get_process_start_time(os.getpid()),
+        boot_epoch=_current_boot_epoch(),
         host=str(host or ""),
         port=int(port) if isinstance(port, int) and port > 0 else None,
         protocol_version=HOST_PROTOCOL_VERSION,
         token_fingerprint=token_fingerprint(token or ""),
         profiles=tuple(str(p) for p in profiles),
-        updated_at=datetime.now(timezone.utc).isoformat(),
+        updated_at=datetime.now(UTC).isoformat(),
         home=str(home or ""),
     )
     try:
@@ -492,7 +614,7 @@ def discard_dead_record(role: str) -> bool:
     record = read_record(role, include_stale=True)
     if record is None:
         return False
-    if record.pid != os.getpid() and _pid_incarnation_matches(record.pid, record.create_time) is not False:
+    if record.pid != os.getpid() and _record_incarnation_matches(record) is not False:
         return False
     for path in (record_path(role), token_path(role)):
         with contextlib.suppress(OSError):

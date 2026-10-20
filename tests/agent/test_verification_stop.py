@@ -14,7 +14,6 @@ from agent.verification_stop import (
     verify_on_stop_enabled,
 )
 
-
 def _node_project(root: Path) -> None:
     (root / "package.json").write_text(
         json.dumps({"scripts": {"test": "vitest", "lint": "eslint ."}}),
@@ -22,18 +21,15 @@ def _node_project(root: Path) -> None:
     )
     (root / "pnpm-lock.yaml").write_text("", encoding="utf-8")
 
-
 def _make_project(root: Path) -> None:
     root.mkdir()
     _node_project(root)
-
 
 @pytest.fixture(autouse=True)
 def _ledger_on(monkeypatch):
     """The ledger is inert unless verify-on-stop is enabled; ``clear_verify_env`` (requested
     explicitly, so it runs after this) strips it again for the enabled()-logic tests."""
     monkeypatch.setenv("HERMES_VERIFY_ON_STOP", "1")
-
 
 @pytest.fixture
 def clear_verify_env(monkeypatch):
@@ -246,10 +242,7 @@ def test_nudge_includes_failed_output_summary(tmp_path, monkeypatch):
     assert "repair the code" in nudge
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Symlinks require elevated privileges on Windows",
-)
+@pytest.mark.platforms("posix")  # Symlinks require elevated privileges on Windows
 def test_no_suite_nudge_uses_canonical_temp_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     project = tmp_path / "project"
@@ -306,7 +299,6 @@ def test_ad_hoc_pass_satisfies_no_suite_stop_loop(tmp_path, monkeypatch):
 
     assert build_verify_on_stop_nudge(session_id="s1", changed_paths=[changed]) is None
 
-
 def test_nudge_attempts_are_bounded(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     _node_project(tmp_path)
@@ -319,7 +311,6 @@ def test_nudge_attempts_are_bounded(tmp_path, monkeypatch):
         attempts=2,
         max_attempts=2,
     ) is None
-
 
 # ---------------------------------------------------------------------------
 # Fix C: documentation/prose edits carry no verifiable behavior and must never
@@ -364,5 +355,3 @@ def test_mixed_doc_and_code_edit_still_nudges(tmp_path, monkeypatch):
     # The doc path is filtered out of the reported set; the code path remains.
     assert code in nudge
     assert doc not in nudge
-
-

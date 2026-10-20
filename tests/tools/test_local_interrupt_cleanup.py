@@ -51,10 +51,10 @@ def _process_group_snapshot(pgid: int) -> str:
 
 
 def _wait_for_pgid_exit(pgid: int, timeout: float = 60.0) -> bool:
-    """Wait for a process group to disappear under loaded xdist hosts.
+    """Wait for a process group to disappear under loaded CI hosts.
 
     The cleanup chain is: SIGTERM → 3s TimeoutStopSec → SIGKILL → reap.
-    Under heavy xdist load (40 parallel workers, 6-shard CI), the full
+    Under heavy parallel-test load (40 workers, 6-shard CI), the full
     sequence can exceed 10s. Default timeout is generous to avoid CI
     flakes; in practice the wait returns in <1s on quiet hosts.
     """
@@ -66,6 +66,7 @@ def _wait_for_pgid_exit(pgid: int, timeout: float = 60.0) -> bool:
     return not _pgid_still_alive(pgid)
 
 
+@pytest.mark.platforms("linux")
 def test_kill_process_refuses_cached_pgid_without_live_ownership(monkeypatch, caplog):
     """A cached numeric group cannot authorize signals after its owner disappears."""
     env = object.__new__(LocalEnvironment)
@@ -94,6 +95,7 @@ def test_kill_process_refuses_cached_pgid_without_live_ownership(monkeypatch, ca
     assert "cleanup incomplete" in caplog.text
 
 
+@pytest.mark.platforms("linux")
 def test_wait_for_process_kills_subprocess_on_keyboardinterrupt(monkeypatch):
     """When KeyboardInterrupt arrives mid-poll, the subprocess group must be
     killed before the exception is re-raised."""
@@ -110,7 +112,7 @@ def test_wait_for_process_kills_subprocess_on_keyboardinterrupt(monkeypatch):
             # that goes through _wait_for_process.
             try:
                 result_holder["result"] = env.execute("sleep 30", timeout=60)
-            except BaseException as e:  # noqa: BLE001 — we want to observe it
+            except BaseException as e:
                 result_holder["exception"] = type(e).__name__
 
         t = threading.Thread(target=worker, daemon=True)
@@ -137,13 +139,13 @@ def test_wait_for_process_kills_subprocess_on_keyboardinterrupt(monkeypatch):
 
         # Give the worker a moment to: hit the exception at the next poll,
         # run the except-block cleanup (_kill_process), and exit.  Under
-        # xdist load the SIGTERM → 3s wait → SIGKILL chain can take longer
+        # heavy load the SIGTERM → 3s wait → SIGKILL chain can take longer
         # than 5s before the worker's join() returns; bumped to 15s.
         t.join(timeout=30.0)
         assert not t.is_alive(), "worker didn't exit within 30 s of the interrupt"
 
         # The critical assertion: the subprocess GROUP must be dead.  Not
-        # just the bash wrapper — the 'sleep 30' child too. Under xdist load,
+        # just the bash wrapper — the 'sleep 30' child too. Under heavy load,
         # process-group disappearance can lag briefly after the worker exits,
         # especially if the process is already dying or waiting to be reaped.
         assert _wait_for_pgid_exit(pgid), (
@@ -183,7 +185,7 @@ def test_exit_cleanup_kills_foreground_command_still_running(monkeypatch):
     the host exiting mid-command would otherwise orphan it to init."""
     from tools import terminal_tool_lifecycle
 
-    monkeypatch.setattr(terminal_tool_lifecycle, "_scratch_paths", lambda: [])
+    monkeypatch.setattr(terminal_tool_lifecycle, "_scratch_paths", list)
     env = LocalEnvironment(cwd="/tmp")
     result: dict = {}
     started, captured = _observe_foreground_wait(env, monkeypatch)
@@ -250,7 +252,7 @@ def test_hard_exit_leaves_no_foreground_survivor_around_the_spawn(scenario, tmp_
     cmd = f"sleep {35000 + os.getpid() % 1000}.{len(scenario)}"
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     r = subprocess.run([sys.executable, "-c", _HARD_EXIT_RACE_CHILD, scenario, cmd], cwd=str(tmp_path),
-                       env={**os.environ, "PYTHONPATH": repo}, capture_output=True, text=True, timeout=120)
+                       env={**os.environ, "PYTHONPATH": repo}, capture_output=True, text=True, timeout=120, check=False)
     assert r.returncode == 0, r.stderr[-2000:]
     time.sleep(0.3)
     survivors = [p for p in psutil.process_iter(["cmdline"]) if cmd in " ".join(p.info["cmdline"] or [])]

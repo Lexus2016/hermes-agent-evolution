@@ -14,7 +14,6 @@ from agent.usage_pricing import (
     has_known_pricing as _has_known_pricing,
 )
 
-
 @pytest.fixture()
 def db(tmp_path):
     """Create a SessionDB with a temp database file."""
@@ -22,7 +21,6 @@ def db(tmp_path):
     session_db = SessionDB(db_path=db_path)
     yield session_db
     session_db.close()
-
 
 @pytest.fixture()
 def populated_db(db):
@@ -137,7 +135,6 @@ def populated_db(db):
     db._conn.commit()
     return db
 
-
 class TestHasKnownPricing:
 
     def test_unknown_custom_model(self):
@@ -151,9 +148,7 @@ class TestHasKnownPricing:
         assert _has_known_pricing("some-opus-model") is False
         assert _has_known_pricing("future-sonnet-v2") is False
 
-
 class TestEstimateCost:
-
 
     def test_cache_aware_usage(self):
         cost, status = _estimate_cost(
@@ -167,7 +162,6 @@ class TestEstimateCost:
         assert status == "estimated"
         expected = (1000 * 3.0 + 500 * 15.0 + 2000 * 0.30 + 400 * 3.75) / 1_000_000
         assert cost == pytest.approx(expected, abs=0.0001)
-
 
 # =========================================================================
 # Format helpers
@@ -227,9 +221,6 @@ class TestInsightsEmpty:
         # Both renderers must handle the empty report without crashing.
         assert engine.format_terminal(report)
         assert engine.format_gateway(report)
-
-
-
 
 # =========================================================================
 # InsightsEngine — populated DB
@@ -300,7 +291,6 @@ class TestInsightsPopulated:
         """A session that switches models mid-flight is split across both
         models in the breakdown, not dumped on the initial model (#51607).
         """
-        now = time.time()
         db.create_session(session_id="sw", source="cli",
                           model="deepseek/deepseek-v4-pro")
         # 40k tokens on deepseek, then switch and 50k on opus.
@@ -556,7 +546,6 @@ class TestInsightsPopulated:
             ]
             assert sorted(pinned) == sorted(unpinned), attr
 
-
     def test_missing_index_falls_back_to_unpinned_queries(self, populated_db):
         """INDEXED BY would be a hard error if the index is missing — which
         happens on read-only opens of a state.db written by an older version
@@ -578,7 +567,6 @@ class TestInsightsPopulated:
         # And with the index present, the pin stays.
         assert "INDEXED BY" in InsightsEngine._GET_TOOL_CALLS_ALL
 
-
     def test_get_usage_breakdown_matches_full_generate(self, populated_db):
         engine = InsightsEngine(populated_db)
         full = engine.generate(days=30)
@@ -595,7 +583,6 @@ class TestInsightsPopulated:
         # github-code-review was in discord (s4), not cli
         assert "github-code-review" not in skill_names
 
-
     def test_get_skill_usage_prefilter_ignores_non_skill_substring(self, db):
         # "my_skill_view_helper" contains "skill_view" as a substring; instr()
         # will match but the Python-side name check keeps the set clean.
@@ -611,7 +598,6 @@ class TestInsightsPopulated:
         focused = InsightsEngine(db).get_usage_breakdown(days=30)["skills"]
         assert focused["summary"]["total_skill_actions"] == 0
         assert focused["top_skills"] == []
-
 
 # =========================================================================
 # Formatting
@@ -662,7 +648,6 @@ class TestTerminalFormatting:
         # hiding them — a custom model with no pricing data shows in the
         # Unknown bucket rather than silently reporting $0.
         assert "Unknown" in text
-
 
 class TestGatewayFormatting:
     def test_gateway_format_is_shorter(self, populated_db):
@@ -849,7 +834,7 @@ class TestEdgeCases:
         assert report["platforms"][0]["platform"] == "cli"
 
         # Terminal format should NOT show platform section for single platform
-        text = engine.format_terminal(report)
+        engine.format_terminal(report)
         # (it still shows platforms section if there's only cli and nothing else)
         # Actually the condition is > 1 platforms OR non-cli, so single cli won't show
 

@@ -45,6 +45,12 @@ memory, and settings stay exactly as they were.
 > Don't want unattended daily updates? Add `--no-star` and/or `--no-auto-update`
 > when you run it (from a clone): `bash upgrade.sh --no-auto-update`.
 
+### Windows & Termux
+
+> **Windows:** Native Windows is supported via `scripts/install.ps1`; see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
+>
+> **Android / Termux:** Use the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux).
+
 ### Troubleshooting
 
 #### Running Hermes in Docker?
@@ -200,7 +206,8 @@ open pull requests, push branches, and cut releases. You own the repo, so use a
 - **Stays current** — periodically brings in useful changes from the original
   Hermes Agent.
 
-Everything you already love about Hermes Agent still works exactly the same.
+- **300+ models & Tool Gateway** — all upstream models, web search, image gen, TTS, cloud browser.
+- **Plus everything in Hermes Agent** — CLI, messaging gateway, TUI, Desktop app, skills, MCP, cron.
 
 ---
 
@@ -248,32 +255,9 @@ Hermes community.
 - **Repository:** [github.com/Lexus2016/hermes-agent-evolution](https://github.com/Lexus2016/hermes-agent-evolution)
 - **Upstream:** [github.com/nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent)
 
-Quick start for contributors — use the standard installer, then work from the
-full git checkout it creates at `$HERMES_HOME/hermes-agent` (usually
-`~/.hermes/hermes-agent`). This matches the layout used by `hermes update`, the
-managed venv, lazy dependencies, gateway, and docs tooling.
-
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-cd "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
-uv pip install -e ".[all,dev]"
-scripts/run_tests.sh
-```
-
-Manual clone fallback (for throwaway clones/CI where you intentionally do not
-want the managed install layout):
-
-Create the venv outside the cloned source tree — a venv inside the directory
-the agent operates from can be wiped by a relative-path command the agent runs
-against its own checkout, destroying the running runtime mid-session.
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv ~/.hermes/venvs/hermes-dev --python 3.11
-source ~/.hermes/venvs/hermes-dev/bin/activate
-uv pip install -e ".[all,dev]"
-scripts/run_tests.sh
-```
+Start with the [PM developer workflow](website/docs/reference/package-management.md#developer-workflow)
+for activation, daily use, dependency changes, and leaving the environment.
+[Development Setup](CONTRIBUTING.md#development-setup) covers the separate test environment and verification commands.
 
 ---
 

@@ -18,9 +18,8 @@ CLAIM_TTL_INACTIVITY_HEADROOM = 3
 
 
 def is_recurring(job: dict) -> bool:
-    """Return True if job has a recurring schedule ('cron' or 'interval')."""
+    """A cron/interval job (vs a one-shot); a null or non-dict ``schedule`` counts as not recurring."""
     if not isinstance(job, dict):
         return False
     schedule = job.get("schedule")
     return isinstance(schedule, dict) and schedule.get("kind") in {"cron", "interval"}
-

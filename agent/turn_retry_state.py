@@ -49,6 +49,9 @@ class TurnRetryState:
     # of continuing backoff-and-retry against the same degraded endpoint.
     consecutive_timeout_hits: int = 0
 
+    # Credit-limited 402 ("can only afford N tokens") already retried with a lowered output cap.
+    affordable_402_clamp_attempted: bool = False
+
     # ── Fail-fast guard for non-retryable client errors ─────────────────
     fail_fast_attempted: bool = False
 
@@ -67,7 +70,6 @@ class TurnRetryState:
     # A user correction cancelled the in-flight request: append a role-safe checkpoint +
     # user message, rebuild the payload, and retry the same logical iteration.
     restart_with_redirected_messages: bool = False
-
     def __iter__(self):
         # Convenience for debugging / tests: iterate (name, value) pairs.
         for f in fields(self):

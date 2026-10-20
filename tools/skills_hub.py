@@ -16,7 +16,7 @@ import logging
 import time
 from contextvars import ContextVar
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import urljoin
@@ -119,14 +119,14 @@ def _skills_hub_http_get(url: str, **kwargs: Any) -> httpx.Response:
 
 
 def _ssrf_safe_http_get(url: str, *, timeout: int = _DEFAULT_HTTP_TIMEOUT,
-                        headers: Optional[Dict[str, str]] = None) -> httpx.Response:
+                        headers: Optional[dict[str, str]] = None) -> httpx.Response:
     """Fetch one URL with connect-time SSRF validation and no automatic redirects."""
     with skills_hub_http_session():
         return _skills_hub_http_client.get().get(url, timeout=timeout, headers=headers)
 
 
 def _guarded_http_get(url: str, *, timeout: int = _DEFAULT_HTTP_TIMEOUT,
-                      headers: Optional[Dict[str, str]] = None) -> Optional[httpx.Response]:
+                      headers: Optional[dict[str, str]] = None) -> Optional[httpx.Response]:
     """Fetch a URL with SSRF and redirect-target validation (each hop re-checked).
 
     *headers* are plain request headers (no credentials) and are sent on every hop."""
@@ -171,7 +171,7 @@ def _guarded_http_get(url: str, *, timeout: int = _DEFAULT_HTTP_TIMEOUT,
 def _guarded_http_stream(
     url: str,
     *,
-    params: Optional[Dict[str, str]] = None,
+    params: Optional[dict[str, str]] = None,
     timeout: int = _DEFAULT_HTTP_TIMEOUT,
 ) -> Iterator[Optional[httpx.Response]]:
     """Stream one response with bounded, policy-checked redirects."""
@@ -240,7 +240,7 @@ def _read_json_if_fresh(path: Path, ttl: float) -> Optional[Any]:
     try:
         if time.time() - path.stat().st_mtime > ttl:
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -284,7 +284,7 @@ class _JsonStateFile:
 
     def _read(self) -> dict:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return json.loads(self.path.read_text(encoding="utf-8-sig"))
         except (json.JSONDecodeError, OSError):
             return json.loads(json.dumps(self.EMPTY))
 
@@ -314,16 +314,16 @@ class HubLockFile(_JsonStateFile):
         scan_verdict: str,
         skill_hash: str,
         install_path: str,
-        files: List[str],
-        metadata: Optional[Dict[str, Any]] = None,
-        scan_provenance: Optional[Dict[str, Any]] = None,
+        files: list[str],
+        metadata: Optional[dict[str, Any]] = None,
+        scan_provenance: Optional[dict[str, Any]] = None,
     ) -> None:
         # Validate name and install-path SHAPE at write time: a poisoned lock
         # entry is the precondition for the uninstall_skill rmtree-escape.
         safe_name = _validate_skill_name(name)
         safe_install_path = _normalize_lock_install_path(install_path, safe_name)
         data = self.load()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         data["installed"][safe_name] = {
             "source": source,
             "identifier": identifier,
@@ -347,7 +347,7 @@ class HubLockFile(_JsonStateFile):
     def get_installed(self, name: str) -> Optional[dict]:
         return self.load()["installed"].get(name)
 
-    def list_installed(self) -> List[dict]:
+    def list_installed(self) -> list[dict]:
         return [{"name": name, **entry} for name, entry in self.load()["installed"].items()]
 
 
@@ -357,10 +357,10 @@ class TapsManager(_JsonStateFile):
     EMPTY = {"taps": []}
     DEFAULT_PATH = staticmethod(_taps_file)
 
-    def load(self) -> List[dict]:
+    def load(self) -> list[dict]:
         return self._read().get("taps", [])
 
-    def save(self, taps: List[dict]) -> None:
+    def save(self, taps: list[dict]) -> None:
         self._write({"taps": taps})
 
     def add(self, repo: str, path: str = "skills/") -> bool:
@@ -389,7 +389,7 @@ def append_audit_log(action: str, skill_name: str, source: str,
     """Append one space-separated line to the audit log (best-effort)."""
     audit_log = _audit_log()
     audit_log.parent.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     parts = [timestamp, action, skill_name, f"{source}:{trust_level}", verdict]
     if extra:
         parts.append(extra)

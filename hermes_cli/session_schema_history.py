@@ -204,6 +204,9 @@ SCHEMA_HISTORY: dict[str, _TableHistory] = {
         )),
         ('26 2026-09-02T14:22Z 8e4366d358', (('+', 'tool_names', 'last_read_at'),)),
         ('27 2026-09-19T00:10Z 922a0c3c87', (('+', 'transport_profile', 'profile_name'),)),
+        ('28 2026-09-25T23:25Z 2941aadffa', (('+', 'compression_overload_streak', 'compression_recovery_deadline'),)),
+        ('29 2026-09-27T00:29Z d75f29934b', (('+', 'created_source', 'source'),)),
+        ('30 2026-09-28T00:00Z #117713', (('+', 'auto_archived', 'archived'),)),
         ),
     ),
     "messages": _TableHistory(
@@ -238,6 +241,12 @@ SCHEMA_HISTORY: dict[str, _TableHistory] = {
             ('+', 'display_order', 'display_identity'),
         )),
         ('16 2026-09-11T12:00Z 8e4366d359', (('+', 'origin', 'display_order'),)),
+        ('17 2026-09-28T08:42Z eed37d63ce', (
+            ('+', 'message_uid', 'origin'),
+            ('+', 'absorbed_message_uids', 'message_uid'),
+            ('+', 'tool_call_uids', 'absorbed_message_uids'),
+            ('+', 'tool_call_uid', 'tool_call_uids'),
+        )),
         ),
     ),
     "session_model_usage": _TableHistory(

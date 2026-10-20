@@ -47,41 +47,38 @@ class StreamFallbackMixin:
             prefix = prefix[:-len(self.cfg.cursor)]
         return self._clean_for_display(prefix)
 
-    @staticmethod
-    def _word_safe_cut(final_text: str, cut: int) -> int:
-        """Move ``cut`` back to a word boundary so a continuation cannot start mid-word.
-
-        The continuation is cut at whatever the last successful EDIT put on screen, and edits fire
-        on a throttle tick rather than at a word boundary. When edits then stop working (flood
-        control), the remainder goes out as a fresh message cut at that arbitrary offset, and one
-        word ends up split across two messages — observed in production as 'рядкам' + 'и (мій…'.
-
-        Backing up to the last space or newline re-sends the few characters of the broken word. That
-        overlap reads as a normal continuation; a severed word does not. With no boundary to back up
-        to (one very long token), the original cut stands rather than re-sending the whole message.
-        """
-        if cut <= 0 or cut >= len(final_text) or final_text[cut].isspace():
-            return cut
-        boundary = max(final_text.rfind(" ", 0, cut), final_text.rfind("\n", 0, cut))
-        return boundary + 1 if boundary > 0 else cut
-
     def _continuation_text(self, final_text: str) -> str:
         """Return only the part of final_text the user has not already seen."""
         prefix = self._fallback_prefix or self._visible_prefix()
         if prefix and final_text.startswith(prefix):
-            cut = self._word_safe_cut(final_text, len(prefix))
+            cut = len(prefix)
+            # ``prefix`` is whatever the last successful edit put on screen. Edits
+            # fire on a throttle tick, not at a word boundary, so that prefix can
+            # end inside a word.  Back the cut up to the last space or newline so
+            # the continuation re-sends the broken word's tail and reads as an
+            # ordinary continuation.  A prefix with no boundary (one very long
+            # token) keeps the original cut rather than re-sending the whole reply.
+            # A prefix that already ends on a whole word needs no back-up: doing it
+            # re-sent that word at the seam.
+            if cut < len(final_text) and not final_text[cut].isspace() and not final_text[cut - 1].isspace():
+                boundary = max(
+                    final_text.rfind(" ", 0, cut),
+                    final_text.rfind("\n", 0, cut),
+                )
+                if boundary >= 0:
+                    cut = boundary + 1
             return final_text[cut:].lstrip()
         return final_text
 
     @staticmethod
-    def _split_text_chunks(text: str, limit: int, len_fn: "Callable[[str], int]" = len,
+    def _split_text_chunks(text: str, limit: int, len_fn: Callable[[str], int] = len,
                            ) -> list[str]:
         """Split text for fallback sends: newline-preferred, fence-balanced across chunks."""
         from gateway.platforms.helpers import split_text_fence_aware
         return split_text_fence_aware(text, limit, len_fn, prefer_paragraphs=False,
                                       balance_fences=True)
 
-    def _truncate_for_stream(self, text: str, limit: int, len_fn: "Callable[[str], int]",
+    def _truncate_for_stream(self, text: str, limit: int, len_fn: Callable[[str], int],
                              ) -> list[str]:
         """Split via the adapter's canonical truncate_message (platform-specific rules);
         non-base test doubles / legacy adapters keep the two-argument call shape."""
@@ -126,9 +123,13 @@ class StreamFallbackMixin:
         last_message_id: Optional[str] = None
         last_successful_chunk = ""
         sent_any_chunk = False
+        # Thread only a FULL resend (it replaces the preview); a tail continuation
+        # keeps its existing unthreaded delivery on every platform.
+        anchor = self._initial_reply_to_id if continuation == final_text else None
         for chunk in chunks:
             result = await self._send_with_flood_retry(
-                content=chunk, retry_log="Flood control on fallback send, retrying in %.1fs")
+                content=chunk, reply_to=None if sent_any_chunk else anchor,
+                retry_log="Flood control on fallback send, retrying in %.1fs")
             if not result or not result.success:
                 # Partial continuation landed: do NOT set _final_response_sent (the
                 # gateway must still deliver the full answer); _already_sent only
@@ -207,10 +208,10 @@ class StreamFallbackMixin:
         self._mark_final_delivered(record=final_text)
         return None
 
-    def _fallback_len_budget(self) -> "tuple[Callable[[str], int], int]":
+    def _fallback_len_budget(self) -> tuple[Callable[[str], int], int]:
         """(len_fn, raw_limit) for fallback chunking — per-chat cap/unit on base adapters."""
         raw_limit = getattr(self.adapter, "MAX_MESSAGE_LENGTH", 4096)
-        _len_fn: "Callable[[str], int]" = len
+        _len_fn: Callable[[str], int] = len
         if isinstance(self.adapter, _BasePlatformAdapter):
             _len_fn = self.adapter.message_len_fn
             try:  # per-chat cap/unit (relay adapter fronting N platforms)
