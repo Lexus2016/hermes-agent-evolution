@@ -49,6 +49,21 @@ Create GitHub issues and pull requests based on research.
     real defects (`[FIX]`) are still filed by the introspection stage regardless
     of this gate. Rationale: features can wait until the backlog drains; bugs
     cannot.
+1c. **Claim audit — re-check the report's figures against the sources it cites (#3521).**
+    Before any finding becomes an issue, run the deterministic post-hoc audit on
+    the report. It tags every checkable figure (counts, percentages, dates) as
+    `verified`, `unverified` or `unattributed`, and exits 1 when a figure does not
+    occur in the excerpt the report itself cites for it — a transcribed or
+    fabricated number:
+    ```bash
+    python scripts/evolution_claim_audit.py ~/.hermes/evolution/research/YYYY-MM-DD.md
+    ```
+    Read `<report>.claim_audit.json` and SKIP every finding whose figures came back
+    `unverified` — record them in your report instead of filing them. `unattributed`
+    figures never block: the report's own priority maths live there by design, and
+    a cited URL with no excerpt in the sidecar cannot be re-checked (that is not
+    evidence of fabrication). When no evidence sidecar exists yet the audit skips
+    and the run continues unchanged.
 2. **Select** proposals with Priority Score >= 0.7
 2a. **Self-critique BEFORE you file (do not propose noise).** A high priority
     score is not enough. For EACH candidate, honestly ask — and DROP it (don't

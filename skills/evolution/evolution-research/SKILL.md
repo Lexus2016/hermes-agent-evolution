@@ -120,6 +120,20 @@ silent failure.
 
 Save the result to `~/.hermes/evolution/research/YYYY-MM-DD.md`:
 
+Write the **evidence sidecar** `~/.hermes/evolution/research/YYYY-MM-DD.sources.json`
+next to it. It is a JSON object mapping every URL you cite to the verbatim excerpt
+(one or two sentences) the figures in that finding were taken from:
+
+```json
+{"https://arxiv.org/abs/2610.31372": "reports 85.2% F1 on a 60-trajectory benchmark, submitted 2026-10-22"}
+```
+
+The `evolution-issues` stage re-checks every number and date you post against that
+excerpt (`scripts/evolution_claim_audit.py`, #3521) and drops findings whose figures
+do not appear in it — so quote exactly and never paraphrase a figure. A report with
+no sidecar still runs, it simply cannot be re-checked.
+
+
 ```markdown
 # Research Report - YYYY-MM-DD
 
