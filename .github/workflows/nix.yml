@@ -29,6 +29,7 @@ on:
 permissions:
   contents: read
 
+jobs:
   # A `paths:` filter cannot gate this workflow: a push to main must run it
   # whatever changed, because the flake packages the product and nine of the
   # checks run the built binary. The `nix` lane is a slow lane
