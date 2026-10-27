@@ -7,13 +7,25 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+# The aggregate gate's check name carries a version (``(v2)`` today): a green run
+# recorded on an old head must stop counting when the required set grows, so ci.yaml
+# bumps the suffix and the protect-main ruleset bumps with it. Match the versioned
+# name, never the literal one, or admission looks for a check no run produces.
+GATE = "All required checks pass"
+_GATE_NAME = re.compile(rf"^{re.escape(GATE)}( \(v\d+\))?$")
+
+
+def _gate_reported(names):
+    return any(_GATE_NAME.fullmatch(name) for name in names)
+
+
 # All applicable policies apply to mixed changes. Parity is required; gains cannot
 # buy regressions. GRASP's baseline-expanded budget is intentionally not used.
 CLASS_GATES = {
-    "memory-skill": ("All required checks pass", "Python lints / Agent Skills spec check (blocking)"),
-    "tool": ("All required checks pass", "Python tests / e2e"),
-    "control": ("All required checks pass", "Python tests / e2e", "Python lints / Windows footguns (blocking)"),
-    "plugin": ("All required checks pass", "Python tests / e2e"),
+    "memory-skill": (GATE, "Python lints / Agent Skills spec check (blocking)"),
+    "tool": (GATE, "Python tests / e2e"),
+    "control": (GATE, "Python tests / e2e", "Python lints / Windows footguns (blocking)"),
+    "plugin": (GATE, "Python tests / e2e"),
 }
 VALIDATION_STEPS = {
     "Python tests / e2e": "Run e2e tests",
@@ -122,7 +134,10 @@ def verify_receipt(files, head, slug, runner, *, now=None):
                 slices[index] = total
         if not slices or set(slices.values()) != {len(slices)} or set(slices) != set(range(1, len(slices) + 1)):
             raise ValueError("Missing complete independent baseline regression test slices")
-        missing = sorted({gate for cls in classes for gate in CLASS_GATES[cls]} - passed)
+        missing = sorted(
+            gate for cls in classes for gate in CLASS_GATES[cls]
+            if not (_gate_reported(passed) if gate == GATE else gate in passed)
+        )
         if missing:
             raise ValueError("Missing successful class validation: " + ", ".join(missing))
         record.update(run_id=run_id, run_attempt=attempt, validated_at=run["updated_at"], baseline=baseline,
