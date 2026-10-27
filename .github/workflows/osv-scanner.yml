@@ -49,7 +49,7 @@ jobs:
         --lockfile=scripts/whatsapp-bridge/package-lock.json
       results-file-name: osv-results.sarif
       fail-on-vuln: false
-emit-status:
+  emit-status:
     name: Emit review status
     runs-on: ubuntu-latest
     needs: scan
@@ -91,8 +91,7 @@ emit-status:
                       vulns.append(f'- {rule_id} in {loc}: {message}')
               print(count)
               if vulns:
-                  print('
-'.join(vulns[:20]), file=sys.stderr)
+                  print('\n'.join(vulns[:20]), file=sys.stderr)
           except Exception:
               print(0)
           ")
@@ -111,8 +110,7 @@ emit-status:
                       rule_id = result.get('ruleId', 'unknown')
                       loc = result.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri', '')
                       vulns.append(f'- {rule_id} in {loc}')
-              print(json.dumps('
-'.join(vulns[:20])))
+              print(json.dumps('\n'.join(vulns[:20])))
           except Exception:
               print(json.dumps(''))
           ")
