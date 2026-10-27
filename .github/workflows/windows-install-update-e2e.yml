@@ -49,8 +49,12 @@ concurrency:
 jobs:
   install-update:
     name: Windows install.ps1 + hermes update E2E
-    runs-on: windows-latest-32-core
-    # A typical run is ~17 min; one slow runner took 28 min for the same work (run 36295230146).
+    # Standard runner: this fork cannot schedule windows-latest-32-core, and a job
+    # that never leaves the queue keeps the ci.yaml run open, so the gate never
+    # reports.
+    runs-on: windows-latest
+    # A typical run is ~17 min on 32 cores; one slow 32-core runner took 28 min for the
+    # same work (run 36295230146). The 4-vCPU image is slower at the same steps.
     timeout-minutes: 75
     steps:
       - name: Checkout code

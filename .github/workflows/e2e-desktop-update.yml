@@ -32,14 +32,20 @@ concurrency:
 jobs:
   update:
     name: Desktop install/update E2E (Linux, ${{ matrix.cell }})
-    runs-on: ubuntu-latest-32-core
-    timeout-minutes: 30
+    # Standard runner: this fork cannot schedule ubuntu-latest-32-core, and a job
+    # that never leaves the queue keeps the whole ci.yaml run open, so the gate
+    # never reports and every PR stays blocked on a check that cannot appear.
+    runs-on: ubuntu-latest
+    # 15 minutes per cell was the 32-core measurement; 4 vCPU runs the same install
+    # and build, so the cap matches the Desktop core E2E job on this image.
+    timeout-minutes: 90
     # Required whenever the e2e_desktop_update lane fires (see ci.yaml): it was
     # advisory until it proved stable, and every main push shard since has passed.
     strategy:
       fail-fast: false
       # One install per shard (every spec restores it; paths are baked in, so
-      # shards cannot share one), so each job stays well inside 15 minutes.
+      # shards cannot share one). Four cells in parallel keep each job inside the
+      # timeout on the standard runner.
       matrix:
         include:
           - cell: first-run
