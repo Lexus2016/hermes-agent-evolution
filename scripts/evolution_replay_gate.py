@@ -41,49 +41,40 @@ EXIT_BAD_INPUT = 2
 _PASSING = {"success"}
 
 
-def replay_grade(record: dict) -> str:
-    """Replay one recorded-input record; return ``pass`` or ``fail``."""
+def replay_grade(record: dict) -> list[str]:
+    """Replay one recorded-input record; one ``pass``/``fail`` per turn."""
     kind = record.get("kind")
     if kind == "skill":
         root = Path(record.get("root") or ".")
         errors = check_repository_edits(root, record.get("base") or "origin/main")
-        return "fail" if errors else "pass"
+        return ["fail" if errors else "pass"]
+    if kind == "trace":
+        # One grade per turn. Session traces are one JSON object per line
+        # (TrajectoryLog.append); grading only the first turn accepts a
+        # session whose later turn failed.
+        path = record.get("path")
+        if not path:
+            raise ValueError("trace record requires path")
+        logs = iter_trajectories(Path(path))
+        if not logs:
+            raise ValueError(f"could not load trajectory: {path}")
+        return [
+            "pass" if replay_trajectory(log).get("outcome") in _PASSING else "fail"
+            for log in logs
+        ]
     raise ValueError(f"unknown record kind: {kind!r}")
 
 
-def _trace_grades(record: dict) -> list[str]:
-    """One ``pass``/``fail`` per trajectory the recorded file contains.
-
-    Session traces are one JSON object per turn (``TrajectoryLog.append``).
-    Grading only the first turn accepts a session whose later turn failed.
-    """
-    path = record.get("path")
-    if not path:
-        raise ValueError("trace record requires path")
-    logs = iter_trajectories(Path(path))
-    if not logs:
-        raise ValueError(f"could not load trajectory: {path}")
-    grades = []
-    for log in logs:
-        outcome = replay_trajectory(log).get("outcome")
-        grades.append("pass" if outcome in _PASSING else "fail")
-    return grades
-
-
 def check_record(record: dict) -> str | None:
-    """None when the replay reproduces the recorded grade, else one reason."""
+    """None when every replayed turn reproduces the recorded grade."""
     expected = record.get("grade")
     if expected not in ("pass", "fail"):
         raise ValueError("record.grade must be 'pass' or 'fail'")
-    if record.get("kind") == "trace":
-        for turn, actual in enumerate(_trace_grades(record), start=1):
-            if actual != expected:
-                return f"turn {turn} replay grade {actual}, recorded {expected}"
-        return None
-    actual = replay_grade(record)
-    if actual == expected:
-        return None
-    return f"replay grade {actual}, recorded {expected}"
+    for turn, actual in enumerate(replay_grade(record), start=1):
+        if actual != expected:
+            where = f"turn {turn} " if record.get("kind") == "trace" else ""
+            return f"{where}replay grade {actual}, recorded {expected}"
+    return None
 
 
 def main(argv: list[str]) -> int:

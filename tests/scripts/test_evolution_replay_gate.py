@@ -1,4 +1,4 @@
-"""Recorded-input replay gate (#3517): passing replay is a no-op, a replay
+"""Recorded-input replay gate (#3517): a passing replay is a no-op, a replay
 that misses the recorded grade exits 1 with one reason line."""
 
 import json
@@ -45,35 +45,29 @@ def _rec(tmp_path, payload, name="record.json"):
     return str(path)
 
 
-def _trace(tmp_path, *statuses):
-    log = TrajectoryLog(session_id="s1", completed=True)
+def _trace(tmp_path, *statuses, name="trace.json"):
+    """One JSON object per status: a single-turn .json or a multi-turn .jsonl."""
+    lines = []
     for i, status in enumerate(statuses):
+        log = TrajectoryLog(session_id="s1", completed=True)
         log.add_tool_call(f"tool_{i}", {"a": i}, result="ok", status=status)
-    return _rec(tmp_path, json.loads(log.to_json()), "trace.json")
+        lines.append(json.dumps(log.to_dict(), sort_keys=True))
+    path = tmp_path / name
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
 
 
-def test_passing_skill_replay_is_noop(tmp_path):
+def test_skill_replay(tmp_path, capsys):
     target, base = _repo(tmp_path)
     target.write_text(BASE.replace("version: 1", "version: 2") + "More.\n")
-    rec = _rec(
-        tmp_path,
-        {"kind": "skill", "root": str(tmp_path), "base": base, "grade": "pass"},
-    )
-    assert main(["g", rec]) == 0
-
-
-def test_failing_skill_replay_rejected(tmp_path, capsys):
-    target, base = _repo(tmp_path)
+    rec = {"kind": "skill", "root": str(tmp_path), "base": base, "grade": "pass"}
+    assert main(["g", _rec(tmp_path, rec)]) == 0
     target.write_text(BASE + "Changed without version bump.\n")
-    rec = _rec(
-        tmp_path,
-        {"kind": "skill", "root": str(tmp_path), "base": base, "grade": "pass"},
-    )
-    assert main(["g", rec]) == 1
+    assert main(["g", _rec(tmp_path, rec, "bad.json")]) == 1
     assert capsys.readouterr().err.startswith("replay gate: rejected:")
 
 
-def test_trace_replay_pass_and_fail(tmp_path, capsys):
+def test_trace_replay(tmp_path, capsys):
     ok = _rec(
         tmp_path,
         {"kind": "trace", "path": _trace(tmp_path, "success"), "grade": "pass"},
@@ -88,21 +82,11 @@ def test_trace_replay_pass_and_fail(tmp_path, capsys):
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
-def test_multiturn_trace_later_failure_rejected(tmp_path, capsys):
-    """A session whose first turn passes and a later turn fails must not
-    grade pass: every trajectory in the file is replayed (#3517 rework)."""
-    turns = tmp_path / "session.jsonl"
-    lines = []
-    for i, status in enumerate(("success", "failure")):
-        log = TrajectoryLog(session_id="s1", completed=True)
-        log.add_tool_call(f"tool_{i}", {"a": i}, result="ok", status=status)
-        lines.append(json.dumps(log.to_dict(), sort_keys=True))
-    turns.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    rec = _rec(
-        tmp_path,
-        {"kind": "trace", "path": str(turns), "grade": "pass"},
-        "multi.json",
-    )
+def test_multiturn_later_failure_rejected(tmp_path, capsys):
+    """First turn success, second turn failure, recorded grade pass: the old
+    first-turn-only grading accepted this. Every turn must be replayed."""
+    path = _trace(tmp_path, "success", "failure", name="session.jsonl")
+    rec = _rec(tmp_path, {"kind": "trace", "path": path, "grade": "pass"}, "multi.json")
     assert main(["g", rec]) == 1
     err = capsys.readouterr().err.strip()
     assert err.startswith("replay gate: rejected:") and "turn 2" in err
@@ -112,6 +96,6 @@ def test_multiturn_trace_later_failure_rejected(tmp_path, capsys):
 def test_recorded_fail_grade_and_bad_input(tmp_path, capsys):
     trace = _trace(tmp_path, "failure")
     assert check_record({"kind": "trace", "path": trace, "grade": "fail"}) is None
-    rec = _rec(tmp_path, {"kind": "nope", "grade": "pass"})
-    assert main(["g", rec]) == 2 and "bad record" in capsys.readouterr().err
+    assert main(["g", _rec(tmp_path, {"kind": "nope", "grade": "pass"})]) == 2
+    assert "bad record" in capsys.readouterr().err
     assert main(["g"]) == 2
