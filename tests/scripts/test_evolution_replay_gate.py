@@ -41,7 +41,7 @@ def _repo(tmp_path):
 
 def _rec(tmp_path, payload, name="record.json"):
     path = tmp_path / name
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8-sig")
     return str(path)
 
 

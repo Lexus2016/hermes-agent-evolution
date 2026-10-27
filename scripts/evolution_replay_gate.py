@@ -82,7 +82,7 @@ def main(argv: list[str]) -> int:
         print("usage: evolution_replay_gate.py <record.json>", file=sys.stderr)
         return EXIT_BAD_INPUT
     try:
-        record = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
+        record = json.loads(Path(argv[1]).read_text(encoding="utf-8-sig"))
         if not isinstance(record, dict):
             raise ValueError("record must be a JSON object")
         reason = check_record(record)
