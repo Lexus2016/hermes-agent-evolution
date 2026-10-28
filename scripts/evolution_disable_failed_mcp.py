@@ -55,8 +55,7 @@ def check_tqmemory_health() -> Tuple[bool, str]:
 
 def disable_in_profiles(dry_run: bool = False) -> List[str]:
     """Set ``mcp_servers.tqmemory.enabled: false`` in all profile configs."""
-    import yaml
-
+    import hermes_yaml as yaml
     mod = _import_tqmemory()
     if mod is None:
         return []

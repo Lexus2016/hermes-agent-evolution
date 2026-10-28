@@ -68,7 +68,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
     if not end:
         return set()
     try:
-        import yaml
+        import hermes_yaml as yaml
         parsed = yaml.safe_load(content[3:end.start() + 3])
     except Exception:
         return set()

@@ -33,8 +33,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    import yaml
-except ImportError:  # pragma: no cover — CI installs pyyaml; unit tests too
+    import hermes_yaml as yaml
+except ImportError:  # pragma: no cover — hermes_yaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
 SKILLS_DIR_NAME = "skills"

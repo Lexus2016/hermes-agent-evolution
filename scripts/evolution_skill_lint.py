@@ -258,7 +258,7 @@ def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
     crash the gate, and an absent one is simply no declaration.
     """
     try:
-        import yaml
+        import hermes_yaml as yaml
     except Exception:
         return []
     text = skill_text or ""
@@ -337,8 +337,7 @@ def find_cap_violations(
 
 # ── IO boundary ────────────────────────────────────────────────────────────────
 def _load_stages(cron_dir: Path) -> List[Dict[str, Any]]:
-    import yaml
-
+    import hermes_yaml as yaml
     stages: List[Dict[str, Any]] = []
     for y in sorted(cron_dir.glob("*.yaml")):
         try:

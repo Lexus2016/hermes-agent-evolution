@@ -4,8 +4,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-import yaml
-
+import hermes_yaml as yaml
 from tools.skill_contracts import applicability, check_contract_edit
 from tools.skill_retrieval import rank_skills
 from tools.skill_manager_tool import _edit_skill, _delete_skill, _remove_file
