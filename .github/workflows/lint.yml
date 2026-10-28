@@ -358,9 +358,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pyyaml
-        run: pip install pyyaml==6.0.3
+      # The checker parses frontmatter through the repo's shared YAML policy
+      # (hermes_yaml, which wraps ruamel.yaml) — not PyYAML. `python scripts/...`
+      # puts scripts/ on sys.path and not the repo root, so a bare import of
+      # hermes_yaml fails, the checker swallows it, and every skill is then
+      # reported as missing its name and description (150 false violations on
+      # a clean tree). PYTHONPATH=. makes the repo root importable.
+      - name: Install ruamel.yaml
+        run: pip install "ruamel.yaml==0.18.16"
 
       - name: Run skills spec check
-        run: python scripts/check_skills_spec.py skills
+        run: PYTHONPATH=. python scripts/check_skills_spec.py skills
 
