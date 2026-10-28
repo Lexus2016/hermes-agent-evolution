@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 try:
-    import yaml
+    import hermes_yaml as yaml
 except ImportError:
     yaml = None  # type: ignore[assignment]
 

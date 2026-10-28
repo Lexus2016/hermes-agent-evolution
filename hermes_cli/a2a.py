@@ -112,8 +112,7 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {**_DEFAULT_CONFIG}
     cfg_path = path or _CONFIG_PATH
     try:
-        import yaml
-
+        import hermes_yaml as yaml
         if cfg_path.is_file():
             loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
             if isinstance(loaded, dict):
@@ -292,7 +291,7 @@ def _iter_skill_docs() -> Iterator[Tuple[str, str, str]]:
     if not _SKILLS_ROOT.is_dir():
         return
     try:
-        import yaml
+        import hermes_yaml as yaml
     except Exception:  # pragma: no cover - yaml is a hard dep in practice
         return
     for skill_md in sorted(_SKILLS_ROOT.rglob("SKILL.md")):

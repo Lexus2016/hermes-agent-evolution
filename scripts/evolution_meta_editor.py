@@ -192,8 +192,7 @@ def read_current_value(
         return None
     path = repo_root / "cron" / "evolution" / param.yaml_file
     try:
-        import yaml
-
+        import hermes_yaml as yaml
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except (OSError, ValueError):
         return None

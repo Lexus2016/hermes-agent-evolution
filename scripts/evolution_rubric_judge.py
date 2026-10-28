@@ -1521,7 +1521,7 @@ def load_rubric_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     if path is None or not Path(path).is_file():
         return config
     try:
-        import yaml
+        import hermes_yaml as yaml
     except ImportError:
         return config  # standalone deployment without pyyaml — defaults
     try:

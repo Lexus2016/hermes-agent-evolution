@@ -80,7 +80,7 @@ def _ensure_venv_python(repo_root: Path, argv: list[str]) -> None:
 
 
 def _load_yaml(path: Path) -> dict:
-    import yaml  # PyYAML ships with Hermes (used for cli-config.yaml etc.)
+    import hermes_yaml as yaml
 
     with open(path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}

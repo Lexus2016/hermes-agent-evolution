@@ -172,8 +172,8 @@ def audit_mcp_servers(servers: Any) -> list[dict[str, str]]:
 def _read_yaml(path: Path) -> Any:
     """Best-effort YAML read; returns ``{}`` on any failure so the audit can't crash."""
     try:
-        import yaml  # noqa: PLC0415
-    except Exception:  # pragma: no cover - yaml ships with hermes
+        import hermes_yaml as yaml
+    except Exception:  # pragma: no cover - hermes_yaml is a hard dependency
         return {}
     if not path.exists():
         return {}

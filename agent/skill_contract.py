@@ -84,8 +84,7 @@ _KNOWN_TOOLS = frozenset({
 
 def extract_skill_contract(skill_markdown: str) -> SkillContract:
     """Extract a typed structural contract from raw skill markdown."""
-    import yaml
-
+    import hermes_yaml as yaml
     content = skill_markdown.strip()
     raw_len = len(content)
 

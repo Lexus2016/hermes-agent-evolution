@@ -468,7 +468,6 @@ from urllib.parse import unquote  # noqa: F401,E402
 from urllib.parse import urlparse  # noqa: F401,E402
 from urllib.parse import urlsplit  # noqa: F401,E402
 from urllib.parse import urlunparse  # noqa: F401,E402
-import yaml  # noqa: F401,E402
 
 
 _PLUGIN_COMPAT_LAZY = {
@@ -503,6 +502,10 @@ _PLUGIN_COMPAT_LAZY = {
     'unified_search': ('tools.skills_hub_search', 'unified_search'),
     'uninstall_skill': ('tools.skills_hub_install', 'uninstall_skill'),
     'windows_hide_flags': ('hermes_cli._subprocess_compat', 'windows_hide_flags'),
+    # Legacy `yaml` re-export. PyYAML is NOT a dependency (hermes_yaml/ruamel is the
+    # repo's YAML policy), so an eager import here made this module unimportable on
+    # every clean install. Resolve lazily to the policy module instead.
+    'yaml': ('hermes_yaml', None),
 }
 
 _plugin_compat_prev_getattr = __getattr__
@@ -513,5 +516,7 @@ def __getattr__(name):  # PEP 562 — chained onto the module's own __getattr__
     if target is None:
         return _plugin_compat_prev_getattr(name)
     import importlib
-    return getattr(importlib.import_module(target[0]), target[1])
+    module = importlib.import_module(target[0])
+    # A None attribute means the legacy name IS the module (e.g. `yaml`).
+    return module if target[1] is None else getattr(module, target[1])
 # ---- END PLUGIN-COMPAT ----

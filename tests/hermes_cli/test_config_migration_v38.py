@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import yaml  # noqa: E402
+import hermes_yaml as yaml  # noqa: E402
 
 from hermes_cli.config_migrations import _migrate_to_38  # noqa: E402
 
