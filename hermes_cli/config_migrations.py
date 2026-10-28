@@ -508,7 +508,11 @@ def _migrate_to_38(results: dict[str, Any], quiet: bool) -> None:
             if not quiet:
                 print(f"  ⚠ {message}")
 
-    # Part 2: rewrite legacy toolset names in tools.<platform>
+    # Part 2: rewrite legacy toolset names in tools.<platform>. Only the two dead
+    # shapes are touched: `messaging` is rewritten to the platform's own toolset, and a
+    # `hermes-*` spelling for a platform that ships no toolset is dropped. Every other
+    # unresolvable name is kept — it may be a plugin toolset that is simply not
+    # registered in this process, and silently erasing it is worse than a stale warning.
     try:
         from toolsets import TOOLSETS
     except Exception:
@@ -534,9 +538,17 @@ def _migrate_to_38(results: dict[str, Any], quiet: bool) -> None:
             if name == "messaging" and suggestion in TOOLSETS:
                 changed.append(suggestion)
                 continue
-            # Unknown and unresolvable — drop (the resolver ignored it
-            # anyway; keeping it just re-fires the startup warning).
-            continue
+            if name.startswith("hermes-"):
+                # A per-platform spelling for a platform that ships no toolset of
+                # its own (hermes-google_chat, hermes-teams): dead by construction,
+                # and only a stale copy of this migration ever produced it.
+                continue
+            # Anything else may be a plugin/MCP toolset this process has not
+            # registered yet — an opt-in plugin toolset such as `spotify` is
+            # switched on exactly by being listed here. The resolver ignores it
+            # until the plugin is installed, but dropping it destroys the user's
+            # choice (and the listing the plugin's lazy install keys off).
+            changed.append(name)
         return changed if changed != list(names) else None
 
     any_change = False
