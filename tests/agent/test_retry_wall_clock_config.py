@@ -25,7 +25,7 @@ def _make_agent(
         )
 
     with (
-        patch("run_agent.OpenAI"),
+        patch("agent.process_bootstrap.OpenAI"),
         patch("hermes_cli.config.load_config", return_value=cfg),
         patch("hermes_cli.config.load_config_readonly", return_value=cfg),
     ):

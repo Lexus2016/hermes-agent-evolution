@@ -5,14 +5,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from agent.error_classifier import FailoverReason, classify_api_error
+from hermes_cli.fallback_config import get_fallback_chain
 from run_agent import AIAgent
 
 
 def _make_agent(fallback_model=None):
     with (
-        patch("run_agent.get_tool_definitions", return_value=[]),
-        patch("run_agent.check_toolset_requirements", return_value={}),
-        patch("run_agent.OpenAI"),
+        patch("model_tools.get_tool_definitions", return_value=[]),
+        patch("model_tools.check_toolset_requirements", return_value={}),
+        patch("agent.process_bootstrap.OpenAI"),
     ):
         agent = AIAgent(
             api_key="test-key",
@@ -29,19 +30,31 @@ def _make_agent(fallback_model=None):
 
 
 class TestIssue3097RetryExhaustionAndFallback:
-    def test_agent_auto_loads_fallback_chain_from_config(self):
-        """When fallback_model arg is None, agent loads configured fallback chain from config."""
+    def test_configured_fallback_chain_reaches_the_agent(self):
+        """A ``fallback_providers`` chain declared in config reaches the agent, in order.
+
+        The agent does not read config for its fallback chain: hermes_cli resolves it with
+        ``get_fallback_chain`` and passes the normalized list in as ``fallback_model``
+        (cli.py, hermes_cli/oneshot.py, cron/scheduler.py). This pins that seam end to end, so a
+        chain written to config still becomes the agent's ordered backups.
+        """
         fake_config = {
             "fallback_providers": [
                 {"provider": "anthropic", "model": "claude-3-5-haiku"},
                 {"provider": "openai", "model": "gpt-4o-mini"},
             ]
         }
-        with patch("hermes_cli.config.load_config_readonly", return_value=fake_config):
-            agent = _make_agent(fallback_model=None)
-            assert len(agent._fallback_chain) == 2
-            assert agent._fallback_chain[0]["provider"] == "anthropic"
-            assert agent._fallback_chain[1]["provider"] == "openai"
+        agent = _make_agent(fallback_model=get_fallback_chain(fake_config))
+        assert len(agent._fallback_chain) == 2
+        assert agent._fallback_chain[0]["provider"] == "anthropic"
+        assert agent._fallback_chain[1]["provider"] == "openai"
+        assert agent._fallback_model == agent._fallback_chain[0]
+
+    def test_undeclared_chain_leaves_no_fallbacks(self):
+        """No chain declared anywhere means the agent has no fallbacks to activate."""
+        agent = _make_agent(fallback_model=get_fallback_chain({}))
+        assert agent._fallback_chain == []
+        assert agent._fallback_model is None
 
     def test_retry_exhaustion_triggers_fallback_activation(self):
         """When retries exhaust on a transient error, try_activate_fallback is invoked with reason and api_error."""

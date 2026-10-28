@@ -3,8 +3,13 @@
 ``init_agent`` is a thin, ordered orchestrator over ``_init_*`` / ``_build_*`` phase
 helpers (routing → callbacks → client → tools → session → config sections → compression →
 context engine). Phase ORDER is load-bearing: later phases read attributes earlier ones set.
-Symbols that tests patch on ``run_agent.*`` (``OpenAI``, ``get_tool_definitions``,
-``logger``, …) are resolved through :func:`_ra` so the patch contract is preserved.
+Symbols that still live on ``run_agent`` (``logger``, ``AIAgent``, …) are resolved through
+:func:`_ra` so tests patching ``run_agent.X`` keep intercepting. The tool snapshot and the client
+do NOT: they are patched at their own seam, which is why this module reads them through the
+``model_tools`` module (``get_tool_definitions``, ``check_toolset_requirements``) and
+``agent.process_bootstrap.OpenAI`` (a lazy proxy resolved at call time). Adding a bare
+``run_agent.<name>`` import for a symbol that moved only re-creates the drift that broke the
+``tests/agent`` patch targets after the v0.22.2 sync.
 """
 
 from __future__ import annotations
