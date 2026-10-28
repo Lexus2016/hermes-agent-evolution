@@ -564,9 +564,9 @@ class TestInit:
     def test_pass_session_id_kwarg_accepted_and_forwarded(self):
         """pass_session_id parameter is accepted by AIAgent and passed to agent."""
         with (
-            patch("run_agent.get_tool_definitions", return_value=[]),
-            patch("run_agent.check_toolset_requirements", return_value={}),
-            patch("run_agent.OpenAI"),
+            patch("model_tools.get_tool_definitions", return_value=[]),
+            patch("model_tools.check_toolset_requirements", return_value={}),
+            patch("agent.process_bootstrap.OpenAI"),
         ):
             a = AIAgent(
                 api_key="test-key-1234567890",
@@ -591,9 +591,9 @@ class TestInit:
     def test_aiagent_init_initializes_session_token_and_cost_attributes(self):
         """AIAgent must initialize session token counters and cost fields required by turn_finalizer."""
         with (
-            patch("run_agent.get_tool_definitions", return_value=[]),
-            patch("run_agent.check_toolset_requirements", return_value={}),
-            patch("run_agent.OpenAI"),
+            patch("model_tools.get_tool_definitions", return_value=[]),
+            patch("model_tools.check_toolset_requirements", return_value={}),
+            patch("agent.process_bootstrap.OpenAI"),
         ):
             a = AIAgent(
                 api_key="test-key-1234567890",
@@ -617,9 +617,9 @@ class TestInit:
     def test_reset_session_state_clears_latency_and_output_history(self):
         """reset_session_state must clear _api_latency_history and _api_output_history."""
         with (
-            patch("run_agent.get_tool_definitions", return_value=[]),
-            patch("run_agent.check_toolset_requirements", return_value={}),
-            patch("run_agent.OpenAI"),
+            patch("model_tools.get_tool_definitions", return_value=[]),
+            patch("model_tools.check_toolset_requirements", return_value={}),
+            patch("agent.process_bootstrap.OpenAI"),
         ):
             a = AIAgent(
                 api_key="test-key-1234567890",
