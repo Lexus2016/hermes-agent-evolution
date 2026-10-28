@@ -41,6 +41,18 @@ def test_unknown_names_dropped_valid_kept(tmp_path, monkeypatch):
     assert out["tools"]["teams"]["disabled"] == ["vision"]
 
 
+def test_plugin_toolset_name_kept_and_config_not_rewritten(tmp_path, monkeypatch):
+    """An unresolvable name may be an opt-in plugin toolset (spotify): keep it, and do
+    not touch the file when nothing actually changed."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    cfg = _write_cfg(tmp_path, {"cli": {"enabled": ["spotify", "terminal"]}})
+    before = cfg.read_text()
+    results = {"config_added": []}
+    _migrate_to_38(results, quiet=True)
+    assert cfg.read_text() == before
+    assert results["config_added"] == []
+
+
 def test_valid_config_untouched_and_idempotent(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     cfg = _write_cfg(tmp_path, {"telegram": {"enabled": ["hermes-telegram"]}})
