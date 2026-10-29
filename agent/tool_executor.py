@@ -470,19 +470,31 @@ def _harm_gate_block_reason(function_name: str, function_args: Any) -> Optional[
 
 
 def _harm_blocked_tool_result(reason: str) -> str:
+    import re
+
     from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
 
-    return json.dumps(
-        {
-            "error": f"Tool execution blocked by safety gate: {reason}",
-            "status": "blocked",
-            "harm_gate": "agent_process_bench",
-            "reason": "safety-gate-blocked",
-            "retryable": False,
-            "recovery_hint": SAFETY_GATE_RECOVERY_HINT,
-        },
-        ensure_ascii=False,
-    )
+    # Machine-readable arm so a digest or scheduler record attributes the block to
+    # exfiltration/credential-access instead of an opaque refusal (#3542). The reason
+    # tag carries it too: the digest vocabulary mirrors this field exactly, so a finer
+    # envelope tag must not be flattened back to the coarse one.
+    arm = re.search(r"\bclass=([a-z][a-z-]*)", reason)
+    payload = {
+        "error": f"Tool execution blocked by safety gate: {reason}",
+        "status": "blocked",
+        "harm_gate": "agent_process_bench",
+        "reason": f"safety-gate-{arm.group(1)}" if arm else "safety-gate-blocked",
+        "retryable": False,
+        "recovery_hint": SAFETY_GATE_RECOVERY_HINT,
+    }
+    if arm:
+        payload["harm_class"] = arm.group(1)
+    flags = re.search(r"\bflags=\[([^\]]*)\]", reason)
+    if flags:
+        payload["harm_flags"] = [
+            part.strip().strip("'\"") for part in flags.group(1).split(",") if part.strip()
+        ]
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _harm_gated_invoke(agent, ref, next_args, messages):

@@ -318,6 +318,14 @@ _WRITE_CONTENT_TOO_LARGE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Safety-gate blocks were a single opaque tag, so a cron job killed by the harm gate
+# looked like any other refusal and could not be fixed from the digest (#3542).
+_SAFETY_GATE_ARM_RE = re.compile(
+    r"\bclass=(?P<arm>exfiltration|credential-access|destructive-command|"
+    r"prompt-injection-marker)\b",
+    re.IGNORECASE,
+)
+
 
 def _classify_failure_reason(content: Any) -> Optional[str]:
     """Sub-classify a *failed* tool result into a coarse reason tag (issue #1325).
@@ -370,10 +378,18 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
             hints.append(v)
     haystack = " ".join(hints)
 
-    if data.get("reason") == "safety-gate-blocked" or re.search(
+    envelope_reason = str(data.get("reason", ""))
+    if envelope_reason.startswith("safety-gate-") or re.search(
         r"tool execution blocked by safety gate:", haystack, re.IGNORECASE
     ):
-        return "safety-gate-blocked"
+        arm = _SAFETY_GATE_ARM_RE.search(haystack)
+        if arm:
+            return f"safety-gate-{arm.group('arm').lower()}"
+        return (
+            envelope_reason
+            if envelope_reason.startswith("safety-gate-")
+            else "safety-gate-blocked"
+        )
     if _FILE_NOT_FOUND_RE.search(haystack):
         return "file-not-found"
     if _PERMISSION_RE.search(haystack):

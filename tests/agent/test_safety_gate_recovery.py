@@ -39,7 +39,9 @@ def test_safety_refusal_stops_dispatch_and_survives_recovery(tmp_path, monkeypat
         payload = json.loads(result)
         assert payload["status"] == "blocked"
         assert payload["harm_gate"] == "agent_process_bench"
-        assert payload["reason"] == "safety-gate-blocked"
+        # The tag names the arm (#3542); the coarse prefix is the stable contract.
+        assert payload["reason"].startswith("safety-gate-")
+        assert payload["harm_class"] == "credential-access"
         assert "credential-access" in payload["error"]
         assert _classify_failure_reason(result) == payload["reason"]
         legacy = {key: payload[key] for key in ("error", "status", "harm_gate")}
@@ -124,7 +126,7 @@ def test_executor_publishes_terminal_refusal_as_failure(tmp_path, monkeypatch, d
         result = message["content"]
         assert "Non-retryable: safety_gate_blocked" in result
         assert "Recovery strategy: surface_blocker" in result
-        assert _classify_failure_reason(result) == "safety-gate-blocked"
+        assert _classify_failure_reason(result) == "safety-gate-credential-access"
         assert _detect_tool_failure(message["tool_call_id"], result)[0]
         assert "exit_code" not in json.loads(result)  # no process was started
     handler.assert_not_called()
