@@ -355,7 +355,7 @@ def test_safety_gate_envelope_names_the_harm_arm(monkeypatch):
 
     monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", "1")
     result = _harm_blocked_tool_result(
-        "harm_score=1.0 flags=['exfiltration'] class=exfiltration remedy=use web_fetch"
+        "harm_score=1.0 flags=['exfiltration'] class=exfiltration remedy=use web_extract"
     )
     envelope = json.loads(result)
     assert envelope["harm_class"] == "exfiltration"
