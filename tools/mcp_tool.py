@@ -250,6 +250,10 @@ _STDIO_RESPAWN_WAIT_SEC = 15.0
 # smaller configured ``keepalive_interval``); stdio only opts in explicitly because local pipes
 # have no remote session TTL. The floor stops a tiny interval busy-looping.
 _DEFAULT_KEEPALIVE_INTERVAL, _MIN_KEEPALIVE_INTERVAL = 180, 5
+# One failed keepalive is retried after this delay before the session is declared degraded: a
+# single "server returned an error response" from a healthy remote server is a hiccup, not a dead
+# transport, and reconnecting on it drops registered tools for the whole rebuild (#3545).
+_KEEPALIVE_RETRY_DELAY = 5.0
 # One bounded cancellation cycle at final shutdown so resistant tasks cannot hang exit.
 _MCP_LOOP_DRAIN_TIMEOUT = 3.0
 # JSON-RPC 2.0 "method not found" (server without optional ``ping``); _ensure_mcp_sdk()

@@ -135,10 +135,35 @@ class MCPServerRunMixin:
                         async with self._rpc_lock:
                             await self._keepalive_probe()
                     except Exception as exc:
+                        # One transient failure (a 5xx from the remote, a dropped ping) is not a dead
+                        # transport: retry once after a bounded delay and only degrade if the retry
+                        # fails too, so a hiccup does not tear the server down and rebuild it (#3545).
                         root = _errors._unwrap_exception_group(exc)
-                        logger.warning("MCP server '%s' keepalive failed, triggering reconnect (state: connected → "
-                                       "degraded): %s: %s", self.name, type(root).__name__, root)
-                        self.mark_suspect(f"keepalive failed: {type(root).__name__}: {root}")
+                        retry_delay = min(_core._KEEPALIVE_RETRY_DELAY, keepalive_interval)
+                        logger.warning("MCP server '%s' keepalive failed (%s: %s); retrying once in %.1fs "
+                                       "before declaring the session degraded",
+                                       self.name, type(root).__name__, root, retry_delay)
+                        await asyncio.sleep(retry_delay)
+                        if self._shutdown_event.is_set():
+                            break
+                        if self.session is not None:
+                            try:
+                                async with self._rpc_lock:
+                                    await self._keepalive_probe()
+                            except Exception as retry_exc:
+                                root = _errors._unwrap_exception_group(retry_exc)
+                                logger.warning("MCP server '%s' keepalive failed twice, triggering reconnect "
+                                               "(state: connected → degraded): %s: %s",
+                                               self.name, type(root).__name__, root)
+                                self.mark_suspect(f"keepalive failed twice: {type(root).__name__}: {root}")
+                                self._reconnect_event.set()
+                                break
+                            logger.info("MCP server '%s': keepalive recovered on retry — staying connected",
+                                        self.name)
+                            self._mark_session_proven()
+                            continue
+                        logger.warning("MCP server '%s': session disappeared during the keepalive retry, "
+                                       "triggering reconnect", self.name)
                         self._reconnect_event.set()
                         break
                     # Survived a full keepalive interval: real proof of health.
