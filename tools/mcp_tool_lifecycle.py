@@ -357,15 +357,53 @@ def _group_alive(pgid: Optional[int], my_pgid: Optional[int]) -> bool:
         return False
 
 
+# Graceful window between SIGTERM and SIGKILL for stdio MCP children. A flat 2 s was too short
+# for Node-based servers (npx children such as context7 unwind their own event loop and close
+# their sockets on SIGTERM, which regularly overran the old sleep and produced a force-kill on
+# an otherwise healthy restart) and it made every fast exit pay the whole wait. The sweep polls
+# this deadline instead and escalates only when something is genuinely still alive (#3545).
+_SIGTERM_GRACE_SECONDS = 5.0
+# Poll cadence inside the grace window. The iteration count is what bounds the wait, so a no-op
+# ``time.sleep`` (tests, a monkeypatched clock) degrades to the old behaviour instead of spinning.
+_TERM_POLL_INTERVAL = 0.1
+
+
+def _reap_survivors(pids: dict[int, str], pgids: dict[int, int], my_pgid: Optional[int]) -> list:
+    """PIDs (or whose process group) that are still alive after SIGTERM."""
+    from gateway.status import _pid_exists  # ``os.kill(pid, 0)`` is NOT a no-op on Windows
+    return [pid for pid in pids if _pid_exists(pid) or _group_alive(pgids.get(pid), my_pgid)]
+
+
+def _wait_for_graceful_exit(pids: dict[int, str], pgids: dict[int, int], my_pgid: Optional[int],
+                            grace: Optional[float] = None) -> list:
+    """Poll until the SIGTERM'd children are gone or ``grace`` elapses; return the survivors.
+
+    A child that exits promptly no longer pays the whole window, and a child that ignores SIGTERM
+    still gets the full window before the SIGKILL pass (#3545).
+    """
+    if not pids:
+        return []
+    window = _SIGTERM_GRACE_SECONDS if grace is None else grace
+    survivors = _reap_survivors(pids, pgids, my_pgid)
+    for _ in range(max(1, round(window / _TERM_POLL_INTERVAL))):
+        if not survivors:
+            break
+        time.sleep(_TERM_POLL_INTERVAL)
+        survivors = _reap_survivors(pids, pgids, my_pgid)
+    return survivors
+
+
 def _kill_orphaned_mcp_children(include_active: bool = False, server_name: Optional[str] = None) -> None:
-    """Best-effort reap of stdio MCP subprocesses: SIGTERM, wait 2s, SIGKILL survivors. By
-    default only ``_orphan_stdio_pids`` are reaped so concurrent cron jobs / live sessions are
+    """Best-effort reap of stdio MCP subprocesses: SIGTERM, poll the grace window, then SIGKILL
+    the survivors.
+
+    By default only ``_orphan_stdio_pids`` are reaped so concurrent cron jobs / live sessions are
     untouched; ``include_active=True`` also kills every ``_stdio_pids`` entry and is only for
     final shutdown after the MCP loop has stopped. ``server_name`` limits the sweep to one
     server (stdio reconnects cleaning up their old transport)."""
     import signal as _signal
     pids, pgids, starts = _take_reapable_pids(include_active, server_name)
-    if not pids:  # skip the 2s sleep every MCP-free shutdown would otherwise pay
+    if not pids:  # skip the grace window every MCP-free shutdown would otherwise pay
         return
 
     try:  # our own pgid, so we never killpg() the gateway itself
@@ -375,14 +413,13 @@ def _kill_orphaned_mcp_children(include_active: bool = False, server_name: Optio
 
     for pid, owner in pids.items():
         _signal_mcp_process(pid, _signal.SIGTERM, owner, pgids.get(pid), my_pgid, starts.get(pid))
-        logger.debug("Sent SIGTERM to orphaned MCP process %d (%s)", pid, owner)
-    time.sleep(2)
+        logger.debug("Sent SIGTERM to orphaned MCP process %d (%s); grace window %.1fs",
+                     pid, owner, _SIGTERM_GRACE_SECONDS)
     sigkill = getattr(_signal, "SIGKILL", _signal.SIGTERM)
-    from gateway.status import _pid_exists  # ``os.kill(pid, 0)`` is NOT a no-op on Windows
-    for pid, owner in pids.items():
-        if _pid_exists(pid) or _group_alive(pgids.get(pid), my_pgid):  # leader or descendants survived SIGTERM
-            _signal_mcp_process(pid, sigkill, owner, pgids.get(pid), my_pgid, starts.get(pid))
-            logger.warning("Force-killed MCP process %d (%s) after SIGTERM timeout", pid, owner)
+    for pid in _wait_for_graceful_exit(pids, pgids, my_pgid):
+        _signal_mcp_process(pid, sigkill, pids[pid], pgids.get(pid), my_pgid, starts.get(pid))
+        logger.warning("Force-killed MCP process %d (%s) after the %.1fs SIGTERM grace window",
+                       pid, pids[pid], _SIGTERM_GRACE_SECONDS)
     # These groups are reaped. Release them last, so a crash partway through the SIGTERM/SIGKILL
     # dance still leaves the supervisor holding them.
     _core._update_death_supervisor("unregister", pgids.values())
