@@ -1106,3 +1106,52 @@ class TestRefusalRecoveryNegationAndProximity:
             "I cannot reach the primary host. Checking the mirror now — that also "
             "returned access denied, but I can fall back to the cached snapshot.",
         ) == 1
+
+class TestSafetyGateAttribution:
+    """A harm-gate block is attributed to its arm instead of the opaque `other`
+    bucket (#3542)."""
+
+    def _gate_session(self, tmp_path, name, error):
+        envelope = json.dumps(
+            {
+                "error": error,
+                "status": "blocked",
+                "harm_gate": "agent_process_bench",
+                "reason": "safety-gate-blocked",
+                "retryable": False,
+            }
+        )
+        return _session(tmp_path, name, [_asst("terminal", "c1"), _tool("c1", envelope)])
+
+    def test_arm_is_named(self, tmp_path):
+        p = self._gate_session(
+            tmp_path,
+            "sg1",
+            "Tool execution blocked by safety gate: harm_score=1.0 "
+            "flags=['exfiltration'] class=exfiltration remedy=use web_fetch",
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {
+            "terminal": {"safety-gate-exfiltration": 1}
+        }
+
+    def test_credential_arm_is_named(self, tmp_path):
+        p = self._gate_session(
+            tmp_path,
+            "sg2",
+            "Tool execution blocked by safety gate: harm_score=1.0 "
+            "flags=['credential-access'] class=credential-access",
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {
+            "terminal": {"safety-gate-credential-access": 1}
+        }
+
+    def test_unattributed_block_keeps_the_coarse_tag(self, tmp_path):
+        p = self._gate_session(
+            tmp_path,
+            "sg3",
+            "Tool execution blocked by safety gate: harm_score=1.0 flags=['exfiltration']",
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"terminal": {"safety-gate-blocked": 1}}

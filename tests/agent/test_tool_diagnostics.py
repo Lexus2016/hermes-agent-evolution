@@ -344,3 +344,26 @@ def test_safety_gate_diagnostics_keep_safe_recovery(monkeypatch):
     suffix = message["content"].split("[diagnostic]", 1)[1]
     assert SAFETY_GATE_RECOVERY_HINT in suffix
     assert "Try an alternative" not in suffix
+
+def test_safety_gate_envelope_names_the_harm_arm(monkeypatch):
+    """The blocked envelope carries the harm arm, and the classifier still reports
+    a safety refusal rather than a generic error (#3542)."""
+    import json
+
+    from agent.tool_executor import _harm_blocked_tool_result
+    from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
+
+    monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", "1")
+    result = _harm_blocked_tool_result(
+        "harm_score=1.0 flags=['exfiltration'] class=exfiltration remedy=use web_fetch"
+    )
+    envelope = json.loads(result)
+    assert envelope["harm_class"] == "exfiltration"
+    assert envelope["harm_flags"] == ["exfiltration"]
+    assert envelope["reason"] == "safety-gate-exfiltration"
+    assert classify(result) == ("safety_gate_blocked", SAFETY_GATE_RECOVERY_HINT)
+
+    # An old-shape reason (no arm) still blocks and stays un-attributed.
+    legacy = json.loads(_harm_blocked_tool_result("harm_score=1.0"))
+    assert "harm_class" not in legacy
+    assert legacy["reason"] == "safety-gate-blocked"
