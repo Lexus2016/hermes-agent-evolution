@@ -411,6 +411,101 @@ def _drop_repeated_recall_lines(text: str) -> str:
     return "\n".join(kept)
 
 
+# An in-bullet provenance date is the only age signal a self-contained bullet carries: the
+# continuation line that normally holds provenance is what disqualifies a bullet below.
+_ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_RECALL_MARKER_RE = re.compile(r"^[-*+]\s+")
+
+
+def _claim_word_set(text: str) -> frozenset:
+    """Normalized word set for claim comparison (same tokenization as memory_staleness)."""
+    return frozenset(w for w in re.split(r"[^a-z0-9]+", text.lower()) if w)
+
+
+def _drop_superseded_claims(text: str) -> str:
+    """Drop the OLDER of two recalled bullets that claim different values for one topic.
+
+    Retrieval can surface an obsolete note beside its replacement and leave the model to
+    reconcile them; the obsolete note is then worse than an unrelated note of the same size
+    (#3539, arXiv:2610.36308). A larger retrieval budget does not help: the harm comes from
+    the stale version still being in the window.
+
+    Every rule here fails OPEN - an uncertain case keeps both bullets:
+
+    * only a SELF-CONTAINED bullet is a candidate, for the reason dedupe refuses one: its
+      provenance lives on the continuation line, and dropping it would re-parent that
+      provenance under a different entry;
+    * the bullet must parse as a ``topic: value`` claim (the same ``split_claim`` the
+      conflict analysis uses), with the date stripped out of the value first - otherwise two
+      competing bullets share their date tokens and look like the same value;
+    * the bullet must carry its own ISO date. Without an age signal there is no way to tell
+      which version is the replacement, and choosing on order alone would be a guess that
+      silently deletes a note;
+    * the pair must clear the thresholds the conflict analysis already uses (topic word-set
+      similarity at/above 0.6, value similarity below 0.5), and equal dates keep both.
+
+    Scope is the section, like dedupe: a heading, rule or prose line at column 0 opens a new
+    one, so a "Profile" claim never evicts a "Recently changed" claim.
+    """
+    from agent.memory_conflicts import DEFAULT_CONFIG, split_claim
+    from agent.memory_staleness import jaccard_similarity
+
+    topic_threshold = float(DEFAULT_CONFIG["topic_similarity_threshold"])
+    value_threshold = float(DEFAULT_CONFIG["value_similarity_threshold"])
+    lines = text.split("\n")
+    drop: set[int] = set()
+    section: list[tuple[int, frozenset, frozenset, tuple[int, int, int]]] = []
+
+    def settle(candidates) -> None:
+        for pos, (index_a, topic_a, value_a, date_a) in enumerate(candidates):
+            for index_b, topic_b, value_b, date_b in candidates[pos + 1:]:
+                if date_a == date_b:
+                    continue
+                if jaccard_similarity(set(topic_a), set(topic_b)) < topic_threshold:
+                    continue
+                if jaccard_similarity(set(value_a), set(value_b)) >= value_threshold:
+                    continue
+                drop.add(index_a if date_a < date_b else index_b)
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        # Indented lines continue the bullet above them; they are never candidates, never
+        # dropped, and never end the section.
+        if stripped and line[0].isspace():
+            continue
+        if stripped and not _RECALL_BULLET_RE.match(stripped):
+            settle(section)
+            section = []
+            continue
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        if following.strip() and following[0].isspace():
+            continue  # carries a continuation line: provenance attached, leave alone
+        content = _RECALL_MARKER_RE.sub("", stripped, count=1).strip()
+        date_match = _ISO_DATE_RE.search(content)
+        if date_match is None:
+            continue
+        claim = split_claim(_ISO_DATE_RE.sub(" ", content))
+        if claim is None:
+            continue
+        topic, value = claim
+        topic_words = _claim_word_set(topic)
+        value_words = _claim_word_set(value)
+        if not topic_words or not value_words:
+            continue
+        date = tuple(int(g) for g in date_match.groups())
+        section.append((index, topic_words, value_words, date))
+    settle(section)
+
+    if not drop:
+        return text
+    kept = [line for i, line in enumerate(lines) if i not in drop]
+    logger.debug(
+        "memory recall: dropped %d superseded claim bullet(s) before prompt assembly",
+        len(drop),
+    )
+    return "\n".join(kept)
+
+
 def build_memory_context_block(raw_context: str) -> str:
     """Wrap prefetched memory in a fenced block with system note."""
     if not raw_context or not raw_context.strip():
@@ -423,6 +518,8 @@ def build_memory_context_block(raw_context: str) -> str:
         # Stays keyed on sanitization alone: a deduped bullet is routine, not a provider fault.
         logger.warning("memory provider returned pre-wrapped context; stripped")
     clean = _drop_repeated_recall_lines(sanitized)
+    # An obsolete note beside its replacement hurts more than an unrelated one (#3539).
+    clean = _drop_superseded_claims(clean)
     # strip() drops the caller's trailing newline. Dedupe preserves one when it
     # is given one; put back the terminator the provider actually wrote so the
     # block round-trips (a missing newline re-parents nothing, but it fails
