@@ -1128,7 +1128,7 @@ class TestSafetyGateAttribution:
             tmp_path,
             "sg1",
             "Tool execution blocked by safety gate: harm_score=1.0 "
-            "flags=['exfiltration'] class=exfiltration remedy=use web_fetch",
+            "flags=['exfiltration'] class=exfiltration remedy=use web_extract",
         )
         s = scan_session(p)
         assert s["tool_failures_by_reason"] == {

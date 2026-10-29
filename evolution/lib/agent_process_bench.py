@@ -134,7 +134,7 @@ def score_step(index: int, tool: str, content: str) -> Dict[str, Any]:
 # narrowed: a URL can carry data in its path, so "network verb + URL" stays a block.
 REMEDY_BY_FLAG: dict[str, str] = {
     "exfiltration": (
-        "fetch a public URL with the web toolset (web_fetch/web_search); shell network "
+        "fetch a public URL with the web toolset (web_extract/web_search); shell network "
         "verbs (curl/wget/scp/nc/rsync) are refused"
     ),
     "credential-access": (

@@ -321,3 +321,31 @@ def test_block_reason_names_the_arm_and_the_safe_alternative():
     ):
         risky = g("terminal", {"command": command})
         assert risky is not None and "class=exfiltration" in risky, command
+
+
+def test_remedy_only_names_registered_tools():
+    """Recovery text must point at tools that actually exist (#3542 follow-up).
+
+    The first cut of the exfiltration remedy said `web_fetch`, which is not an
+    agent-facing tool: the web toolset registers `web_search` and `web_extract`
+    (toolsets.py, tools/web_tools.py). Following that advice produced an
+    unavailable-tool call, so the remedy for a refusal was itself a failure.
+    """
+    import re
+
+    import toolsets as tset
+
+    from evolution.lib.agent_process_bench import REMEDY_BY_FLAG
+
+    registered = set(tset._HERMES_CORE_TOOLS)
+    for spec in tset.TOOLSETS.values():
+        registered.update(spec.get("tools", ()))
+
+    for arm, remedy in REMEDY_BY_FLAG.items():
+        named = re.findall(r"\b(?:web|browser|vision|terminal|process)_[a-z_]+\b", remedy)
+        unknown = [n for n in named if n not in registered]
+        assert not unknown, f"arm {arm} names unregistered tool(s): {unknown}"
+
+    # The web arm has to name real web toolset members, extraction included.
+    assert "web_extract" in REMEDY_BY_FLAG["exfiltration"]
+    assert "web_fetch" not in REMEDY_BY_FLAG["exfiltration"]
