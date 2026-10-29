@@ -29,13 +29,34 @@ _MCP_INJECTION_PATTERNS = [
         (r"import\s+(subprocess|os|shutil|socket)", "dangerous import reference"))]
 
 
+#: ``(server, tool, sha256(description))`` already reported at WARNING in this process. The scan
+#: runs on every tool registration, so a re-attach (reconnect, cron tick, new session) re-listed the
+#: same unchanged description and logged the same warning again: 7 identical tqmemory lines in one
+#: day (#3545). De-duplicating by content keeps the finding visible once without the repeat noise;
+#: a changed description is a new key and warns again. Bounded so a server that rotates its
+#: descriptions cannot grow the set without limit.
+_WARNED_DESCRIPTION_DIGESTS: dict = {}
+_MAX_WARNED_DESCRIPTION_DIGESTS = 256
+
+
+def _description_warning_is_new(server_name: str, tool_name: str, description: str) -> bool:
+    """True the first time this process sees *description* for this server/tool; records it."""
+    key = (server_name, tool_name, hashlib.sha256(description.encode("utf-8", "replace")).hexdigest())
+    if key in _WARNED_DESCRIPTION_DIGESTS:
+        return False
+    _WARNED_DESCRIPTION_DIGESTS[key] = None
+    while len(_WARNED_DESCRIPTION_DIGESTS) > _MAX_WARNED_DESCRIPTION_DIGESTS:
+        _WARNED_DESCRIPTION_DIGESTS.pop(next(iter(_WARNED_DESCRIPTION_DIGESTS)))
+    return True
+
+
 def _scan_mcp_description(server_name: str, tool_name: str, description: str) -> list[str]:
     """Scan a tool description for injection patterns; returns finding strings (empty =
-    clean) and logs a warning when any match."""
+    clean) and logs a warning the first time this process sees that exact description."""
     if not description:
         return []
     findings = [reason for pattern, reason in _MCP_INJECTION_PATTERNS if pattern.search(description)]
-    if findings:
+    if findings and _description_warning_is_new(server_name, tool_name, description):
         logger.warning("MCP server '%s' tool '%s': suspicious description content — %s. Description: %.200s",
                        server_name, tool_name, "; ".join(findings), description)
     return findings
