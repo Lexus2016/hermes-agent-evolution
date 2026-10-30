@@ -238,7 +238,7 @@ class TestMainWiring:
     function.
     """
 
-    def test_main_calls_quality_gate(self, monkeypatch):
+    def test_main_calls_quality_gate(self, monkeypatch, tmp_path):
         """Verify main() routes through check_merge_policy_with_quality.
 
         The closed PR #1212 was rejected because main() called
@@ -248,6 +248,14 @@ class TestMainWiring:
         which is called internally by the quality function — that's expected).
         """
         import evolution_merge_gate as emg
+
+        # main() defaults the floor-gate input to ~/.hermes/evolution, which the
+        # home-IO guard refuses (the test failed on every runner with
+        # "TEST BUG: file I/O against the REAL hermes home"). Point it at a temp
+        # path: this test is about the quality wiring, not the floor gate.
+        monkeypatch.setenv(
+            "EVOLUTION_FLOOR_SCORES", str(tmp_path / "floor_scores.json")
+        )
 
         called = {"quality": False}
         orig_quality = emg.check_merge_policy_with_quality
