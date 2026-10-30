@@ -23,6 +23,11 @@ from agent.turn_truncation import boosted_output_cap
 
 logger = logging.getLogger("agent.conversation_loop")
 
+# #3540: below this many audited traces the residual-budget value of a restart
+# is uncertified, so a bad-run signal abstains instead of restarting. Callers
+# that record no sample (trace_sample_size unset) keep the current behaviour.
+_MIN_CERTIFIED_TRACE_SAMPLE = 30
+
 
 def _anchors_current_turn(messages: Any, idx: Any, user_message: Any) -> bool:
     """True when ``messages[idx]`` is this turn's user row (verbatim, or its user-originated view)."""
@@ -664,6 +669,19 @@ def apply_retry_restarts(
         return _verdict("continue")
 
     if _retry.restart_with_rebuilt_messages:
+        # #3540: a bad-run signal restarts the stalled attempt only when the
+        # trace sample certifies the replacement's residual-budget value.
+        # Below the threshold, log the residual budget and abstain.
+        _sample = getattr(agent, "trace_sample_size", None)
+        if _sample is not None and _sample < _MIN_CERTIFIED_TRACE_SAMPLE:
+            _residual = getattr(agent.iteration_budget, "remaining", None)
+            logger.info(
+                "Residual budget %s; restart refused, trace sample %s is below "
+                "the certification threshold %s (arXiv:2610.36544)",
+                _residual, _sample, _MIN_CERTIFIED_TRACE_SAMPLE,
+            )
+            _turn_exit_reason = "residual_budget_uncertified"
+            return _verdict("break")
         restart_count += 1
         if restart_count > max_retries:
             # A stall/failure keeps re-escalating to the fallback chain: stop refunding the
