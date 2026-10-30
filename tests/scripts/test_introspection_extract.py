@@ -18,7 +18,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from introspection_extract import build_digest, scan_session  # noqa: E402
+from introspection_extract import (  # noqa: E402
+    _parse_timestamp,
+    build_digest,
+    scan_session,
+)
 
 
 def _session(tmp_path, name, lines, *, age_days=0):
@@ -808,6 +812,75 @@ class TestStateDB:
         assert d["sessions_scanned"] == 1
         assert d["signals"]["tool_failures"] == {"read_file": 1}
 
+    def test_state_db_iso_timestamps_are_parsed(self, tmp_path):
+        """#3538 — an ISO-8601 ``timestamp`` must still date the session.
+
+        The column is declared REAL, but stores migrated from JSONL or written
+        through an adapter carry strings. ``float()`` raised, the error was
+        swallowed, the session lost its timestamp, and the freshness decision
+        fell back to the database FILE mtime — with an older file that meant
+        every session was skipped and the digest reported
+        ``sessions_scanned: 0`` forever, with no error anywhere.
+        """
+        import os
+
+        now = time.time()
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 2 * 86400))
+        _state_db(
+            tmp_path,
+            [
+                {"session_id": "iso-1", "timestamp": iso, **_db_asst("terminal", "c1")},
+                {"session_id": "iso-1", "timestamp": iso, **_db_tool("c1", _term("ok"))},
+            ],
+        )
+        # The database file looks old; only the row timestamps tell the truth.
+        old = now - 30 * 86400
+        os.utime(tmp_path / "state.db", (old, old))
+
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 1
+        assert d["sessions_undated"] == 0
+
+    def test_state_db_undated_session_is_counted_and_reported(self, tmp_path):
+        """#3538 — an unreadable timestamp must be counted, not silently dropped.
+
+        Counting it keeps the session in the digest; reporting it in
+        ``sessions_undated`` makes the blindness visible instead of showing up
+        as a healthy-looking zero scan.
+        """
+        import os
+
+        now = time.time()
+        _state_db(
+            tmp_path,
+            [
+                {"session_id": "odd-1", "timestamp": "not-a-time", **_db_asst("terminal", "c1")},
+                {"session_id": "odd-1", "timestamp": "not-a-time", **_db_tool("c1", _term("ok"))},
+            ],
+        )
+        old = now - 30 * 86400
+        os.utime(tmp_path / "state.db", (old, old))
+
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 1
+        assert d["sessions_undated"] == 1
+
+    def test_state_db_numeric_timestamps_still_win(self, tmp_path):
+        """#3538 — the ordinary numeric column keeps its exact behaviour."""
+        now = time.time()
+        _state_db(
+            tmp_path,
+            [
+                {"session_id": "num-1", "timestamp": now - 2 * 86400, **_db_asst("terminal", "c1")},
+                {"session_id": "num-1", "timestamp": now - 2 * 86400, **_db_tool("c1", _term("ok"))},
+                {"session_id": "num-old", "timestamp": now - 30 * 86400, **_db_asst("read_file", "c2")},
+                {"session_id": "num-old", "timestamp": now - 30 * 86400, **_db_tool("c2", _fail("gone"))},
+            ],
+        )
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 1
+        assert d["sessions_undated"] == 0
+
     def test_state_db_at_hermes_home_root(self, tmp_path, monkeypatch):
         """#623 — state.db can live at HERMES_HOME root, not under sessions_dir."""
         home = tmp_path / "home"
@@ -1155,3 +1228,33 @@ class TestSafetyGateAttribution:
         )
         s = scan_session(p)
         assert s["tool_failures_by_reason"] == {"terminal": {"safety-gate-blocked": 1}}
+
+
+class TestParseTimestamp:
+    """#3538 — every shape a SessionDB timestamp can take, and none beyond."""
+
+    def test_epoch_numbers(self):
+        assert _parse_timestamp(1700000000) == 1700000000.0
+        assert _parse_timestamp(1700000000.5) == 1700000000.5
+
+    def test_numeric_string(self):
+        assert _parse_timestamp("1700000000") == 1700000000.0
+
+    def test_iso_utc(self):
+        assert _parse_timestamp("2026-10-29T09:00:00Z") == 1793264400.0
+
+    def test_iso_with_fraction_and_offset(self):
+        assert _parse_timestamp("2026-10-29T11:00:00.250+02:00") == 1793264400.25
+
+    def test_iso_without_zone_is_read_as_utc(self):
+        assert _parse_timestamp("2026-10-29T09:00:00") == 1793264400.0
+
+    def test_date_only(self):
+        assert _parse_timestamp("2026-10-29") == 1793232000.0
+
+    def test_unreadable_values_are_not_guessed(self):
+        for value in ("", "   ", "not-a-time", "29/10/2026", None, True, [], {}):
+            assert _parse_timestamp(value) is None
+
+    def test_impossible_calendar_date(self):
+        assert _parse_timestamp("2026-02-30T00:00:00Z") is None
