@@ -28,12 +28,18 @@ class MockStatelessServer:
         self.call_metas = []
 
     async def send_request(self, request, _result_type):
-        method = request.get("method")
+        # The SDK sends a pydantic request model (it dumps it with model_dump), so a
+        # dict-only fake hides exactly the bug that killed discovery before #3543.
+        method = getattr(request, "method", None)
+        params = getattr(request, "params", None)
+        if isinstance(request, dict):
+            method = request.get("method")
+            params = request.get("params")
         if method == "server/discover":
             self.discover_calls += 1
             return {"capabilities": {"tools": True}}
         if method == "tools/call":
-            self.call_metas.append((request.get("params") or {}).get("_meta", {}))
+            self.call_metas.append((params or {}).get("_meta", {}))
             return {"content": [], "isError": False}
         raise RuntimeError(f"method not found: {method}")
 
