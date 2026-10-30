@@ -24,6 +24,14 @@ from tools.mcp_tasks import (
 from tools.mcp_tool import _make_tool_handler, _servers
 
 
+def _rpc_method(req: Any) -> Any:
+    """Method name of an outgoing request: SDK sessions get a pydantic model (#3543)."""
+    method = getattr(req, "method", None)
+    if method is not None:
+        return method
+    return req.get("method") if isinstance(req, dict) else None
+
+
 def test_mcp_task_dataclass_and_serialization() -> None:
     task = MCPTask(
         task_id="task_abc123",
@@ -123,7 +131,7 @@ def test_poll_task_to_completion() -> None:
         ]
 
         async def mock_send_request(req, *args, **kwargs):
-            method = req.get("method")
+            method = _rpc_method(req)
             if method == "tasks/get":
                 return (
                     poll_responses.pop(0)
@@ -304,6 +312,79 @@ def test_mcp_task_manager_cancellation() -> None:
     asyncio.run(_run())
 
 
+def test_send_mcp_rpc_request_speaks_the_sdk_typed_contract() -> None:
+    """Regression for #3543: ClientSession dumps a pydantic request, never a dict.
+
+    The fake below replays the two statements the real
+    ``mcp.client.session.ClientSession.send_request`` runs around the call, so a
+    plain-dict envelope reproduces ``AttributeError: 'dict' object has no attribute
+    'model_dump'`` exactly as it happened in the poller on 2026-10-15 onward.
+    """
+
+    class SdkLikeSession:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, Any]] = []
+
+        async def send_request(
+            self,
+            request: Any,
+            result_type: Any,
+            request_read_timeout_seconds: float | None = None,
+            metadata: Any = None,
+            progress_callback: Any = None,
+        ) -> Any:
+            data = request.model_dump(by_alias=True, mode="json", exclude_none=True)
+            self.sent.append(data)
+            raw = {
+                "task": {
+                    "taskId": data["params"]["taskId"],
+                    "status": "working",
+                    "progress": 0.5,
+                }
+            }
+            return result_type.validate_python(raw, by_name=False)
+
+    async def _run() -> None:
+        session = SdkLikeSession()
+        task = await get_task(session, "t_3543", server_name="brontir-research")
+        assert task.task_id == "t_3543"
+        assert task.status == "working"
+        assert task.progress == 0.5
+        assert session.sent == [{"method": "tasks/get", "params": {"taskId": "t_3543"}}]
+
+        # tasks/result and tasks/cancel go out with their params untouched too.
+        session.sent.clear()
+        raw = await send_mcp_rpc_request(session, "tasks/cancel", {"taskId": "t_1", "reason": "stop"})
+        assert raw["task"]["taskId"] == "t_1"
+        assert session.sent == [
+            {"method": "tasks/cancel", "params": {"taskId": "t_1", "reason": "stop"}}
+        ]
+
+    asyncio.run(_run())
+
+
+def test_send_mcp_rpc_request_single_arg_send_request_gets_the_model() -> None:
+    """A one-argument send_request is called with the request model, not two arguments."""
+
+    class SingleArgSession:
+        def __init__(self) -> None:
+            self.sent: list[Any] = []
+
+        async def send_request(self, request: Any) -> Any:
+            self.sent.append(request)
+            return {"success": True}
+
+    async def _run() -> None:
+        session = SingleArgSession()
+        ok = await cancel_task(session, "t_1", reason="stop")
+        assert ok is True
+        assert len(session.sent) == 1
+        assert session.sent[0].method == "tasks/cancel"
+        assert session.sent[0].params == {"taskId": "t_1", "reason": "stop"}
+
+    asyncio.run(_run())
+
+
 def test_wired_mcp_tool_call_handler_with_tasks_extension() -> None:
     """Test that _make_tool_handler detects a taskId in tools/call response and drives it to completion."""
     server_name = "test_server_task"
@@ -323,7 +404,7 @@ def test_wired_mcp_tool_call_handler_with_tasks_extension() -> None:
         return initial_call_result
 
     async def mock_send_request(req, *args, **kwargs):
-        method = req.get("method")
+        method = _rpc_method(req)
         if method == "tasks/get":
             return {
                 "task": {

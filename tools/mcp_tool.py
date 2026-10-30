@@ -541,15 +541,11 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
         if self.session is None:
             return self.synthesize_capabilities()
         try:
-            result = await self.session.send_request(
-                {
-                    "jsonrpc": "2.0",
-                    "method": "server/discover",
-                    "params": {},
-                    "id": 0,
-                },
-                Any,
-            )
+            # The SDK's send_request dumps a pydantic request, so the raw envelope this
+            # used to pass raised AttributeError and the discovery never ran (#3543).
+            from tools.mcp_tasks import send_mcp_rpc_request
+
+            result = await send_mcp_rpc_request(self.session, "server/discover", {})
         except Exception:
             # server/discover not supported → synthesize default caps
             return self.synthesize_capabilities()
