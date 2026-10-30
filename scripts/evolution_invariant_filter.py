@@ -27,7 +27,7 @@ Slices shipped here:
   * **Slice 5** (#3518, pinned invariant core) — the default load reads the
     rules from a pinned copy OUTSIDE the agent-writable tree
     (``~/.hermes/evolution/pinned/``, override: ``$EVOLUTION_PINNED_RULES``),
-    seeded once at deploy time via ``--seed-pinned-rules``. The filter refuses
+    copied there once at deploy time. The filter refuses
     to run when that surface is missing or shadowed by an in-tree copy, so a
     self-edit cannot weaken the rules it is judged against.
   * **Slice 4** (pinned safe-fallback set) — ``load_safe_fallbacks`` /
@@ -69,10 +69,7 @@ from typing import Any, Dict, List, Optional, Tuple
 _RULES_FILENAME = "evolution_invariant_rules.json"
 
 # Slice 5 (#3518): the rules the filter judges against live OUTSIDE the tree
-# the agent commits to. A self-edit can rewrite the in-tree
-# ``evolution_invariant_rules.json`` (the shipped seed), but it cannot reach the
-# pinned copy, so it cannot weaken the checks that govern it. The pinned file
-# is seeded exactly once from the in-tree copy and never overwritten after.
+# the agent commits to, so a self-edit cannot weaken the checks that govern it.
 _PINNED_RULES_DIR = Path.home() / ".hermes" / "evolution" / "pinned"
 _SHADOW_NAMES = (
     "evolution_invariant_rules.in-tree.json",
@@ -81,11 +78,7 @@ _SHADOW_NAMES = (
 
 
 def pinned_rules_path() -> Path:
-    """Where the read-only pinned rules live.
-
-    ``EVOLUTION_PINNED_RULES`` overrides the location (tests, alternate
-    profiles). The default sits under the hermes home, outside any checkout.
-    """
+    # ``$EVOLUTION_PINNED_RULES`` overrides the default pinned location.
     override = os.environ.get("EVOLUTION_PINNED_RULES", "").strip()
     if override:
         return Path(override)
@@ -93,12 +86,7 @@ def pinned_rules_path() -> Path:
 
 
 def _assert_not_shadowed(pinned: Path) -> None:
-    """Refuse to run when an in-tree copy shadows the pinned surface.
-
-    A rules-override file planted beside the pinned file means something tried
-    to install a second rules source where the loader looks. Fail closed
-    instead of guessing which one wins.
-    """
+    """Refuse to run when an in-tree copy shadows the pinned surface."""
     for name in _SHADOW_NAMES:
         shadow = pinned.parent / name
         if shadow.is_file():
@@ -108,42 +96,14 @@ def _assert_not_shadowed(pinned: Path) -> None:
 
 
 def _resolve_rules_file() -> Path:
-    """Return the pinned rules file. Fail closed when it is missing.
-
-    The pinned surface is seeded EXPLICITLY (``seed_pinned_rules`` at deploy
-    time), never implicitly at load time: an implicit seed would make the
-    guarantee depend on whatever the agent-writable tree contains at that
-    moment, which is exactly the thing being defended against.
-    """
+    """Pinned rules file; fail closed when missing (installed at deploy time)."""
     pinned = pinned_rules_path()
     _assert_not_shadowed(pinned)
     if not pinned.is_file():
         raise ValueError(
-            f"pinned invariant surface missing at {pinned} - seed it once "
-            f"with: evolution_invariant_filter.py --seed-pinned-rules"
+            f"pinned invariant surface missing at {pinned} - copy the in-tree "
+            f"rules file there once at deploy time"
         )
-    return pinned
-
-
-def seed_pinned_rules() -> Path:
-    """Deploy-time bootstrap: copy the in-tree rules to the pinned surface.
-
-    Run once by the installer/CI (or an operator). Never called by the load
-    path, so a missing surface fails closed instead of silently regrowing
-    from tree content a self-edit could have rewritten.
-    """
-    pinned = pinned_rules_path()
-    _assert_not_shadowed(pinned)
-    source = _rules_path()
-    payload = source.read_text(encoding="utf-8")
-    if not payload.strip():
-        raise ValueError(f"in-tree seed {source} is empty")
-    pinned.parent.mkdir(parents=True, exist_ok=True)
-    pinned.write_text(payload, encoding="utf-8")
-    try:  # best-effort read-only; enforcement is the operator's mount, not us
-        pinned.chmod(0o444)
-    except OSError:
-        pass
     return pinned
 
 
@@ -546,10 +506,6 @@ def _load_proposal(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
 
 
 def main(argv: List[str]) -> int:
-    if "--seed-pinned-rules" in argv[1:]:
-        seeded = seed_pinned_rules()
-        print(f"[evolution-invariant-filter] seeded pinned rules at {seeded}")
-        return 0
     positional = [a for a in argv[1:] if not a.startswith("-")]
     path = positional[0] if positional else None
     proposal, err = _load_proposal(path)
