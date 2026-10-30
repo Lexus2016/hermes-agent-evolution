@@ -496,3 +496,151 @@ class TestCheckMergeMethodPolicy:
         # method policy opts out rather than blocking on missing data.
         assert check_merge_method_policy(None, "squash") == []
         assert check_merge_method_policy("", "squash") == []
+
+
+# ── #3517: the replay gate must be reachable from the merge path ───────
+
+
+class TestShippedReplayGate:
+    """A replay gate nothing calls is dead code. A PR that ships
+    ``.evolution/replay-record.json`` is replayed at the reviewed head SHA by the
+    pre-merge path, and a replay that misses its recorded grade keeps the PR out
+    of the merge path instead of being reported and ignored."""
+
+    def _trace_text(self, *statuses):
+        from evolution_trajectory_logger import TrajectoryLog
+
+        lines = []
+        for i, status in enumerate(statuses):
+            log = TrajectoryLog(session_id="s1", completed=True)
+            log.add_tool_call(f"tool_{i}", {"a": i}, result="ok", status=status)
+            lines.append(json.dumps(log.to_dict(), sort_keys=True))
+        return "\n".join(lines) + "\n"
+
+    def _wire(
+        self,
+        monkeypatch,
+        tmp_path=None,
+        *,
+        trace_status="success",
+        record_grade="pass",
+        branch="fix/replay-wiring",
+        record=None,
+    ):
+        import base64 as _b64
+        import evolution_merge_gate as emg
+
+        # Keep the floor-gate default path out of the real hermes home.
+        floor = (tmp_path or Path(".")) / "floor_scores.json"
+        monkeypatch.setenv("EVOLUTION_FLOOR_SCORES", str(floor))
+
+        payload = record
+        if payload is None:
+            payload = {
+                "kind": "trace",
+                "path": "evidence/turns.jsonl",
+                "grade": record_grade,
+            }
+        contents = {
+            ".evolution/replay-record.json": _b64.b64encode(
+                json.dumps(payload).encode()
+            ).decode(),
+            "evidence/turns.jsonl": _b64.b64encode(
+                self._trace_text("success", trace_status).encode()
+            ).decode(),
+        }
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            joined = " ".join(cmd)
+            for path, enc in contents.items():
+                if f"contents/{path}?ref=" in joined:
+                    return 0, enc, ""
+            if api_merge in joined:
+                return 0, "{}", ""
+            return 1, "", "not found"
+
+        api_merge = "repos/O/r/pulls/42/merge"
+        files = [
+            _f(".evolution/replay-record.json", 4, 0),
+            _f("evidence/turns.jsonl", 6, 0),
+            _f("scripts/replay_wiring.py", 40, 2),
+            _f("tests/scripts/test_replay_wiring.py", 30, 0),
+        ]
+        monkeypatch.setattr(
+            emg,
+            "_pr_snapshot",
+            lambda pr, repo, runner: (files, "deadbeefcafe", branch),
+        )
+        monkeypatch.setattr(emg, "_run", runner)
+        return emg, calls
+
+    @staticmethod
+    def _merge_calls(calls):
+        return [c for c in calls if "/pulls/42/merge" in " ".join(c)]
+
+    def test_failed_replay_blocks_the_merge(self, monkeypatch, capsys, tmp_path):
+        emg, calls = self._wire(
+            monkeypatch, tmp_path, trace_status="failure", record_grade="pass"
+        )
+        rc = emg.main(["x", "--pr", "42", "--merge", "--repo", "O/r"])
+        out = capsys.readouterr().out
+        assert rc == 1, out
+        assert "REPLAY_NOT_REPRODUCED" in out
+        assert self._merge_calls(calls) == [], "a failed replay must not reach the merge API"
+
+    def test_unfinished_session_blocks_the_merge(self, monkeypatch, capsys, tmp_path):
+        emg, calls = self._wire(
+            monkeypatch, tmp_path, trace_status="pending", record_grade="pass"
+        )
+        rc = emg.main(["x", "--pr", "42", "--merge", "--repo", "O/r"])
+        out = capsys.readouterr().out
+        assert rc == 1, out
+        assert "REPLAY_NOT_REPLAYABLE" in out
+        assert "replay grade fail" not in out
+        assert self._merge_calls(calls) == []
+
+    def test_reproduced_replay_merges_at_reviewed_head(self, monkeypatch, capsys, tmp_path):
+        emg, calls = self._wire(
+            monkeypatch, tmp_path, trace_status="success", record_grade="pass"
+        )
+        rc = emg.main(["x", "--pr", "42", "--merge", "--repo", "O/r"])
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        merge = self._merge_calls(calls)
+        assert merge, calls
+        assert "sha=deadbeefcafe" in merge[0]
+
+    def test_pr_without_record_skips_the_replay_step(self):
+        import evolution_merge_gate as emg
+
+        def runner(cmd):  # pragma: no cover - must not be reached
+            raise AssertionError(f"unexpected gh call: {cmd}")
+
+        files = [_f("scripts/replay_wiring.py", 40, 2)]
+        assert emg._check_shipped_replay(files, "sha", "O/r", runner) == []
+
+    def test_unreadable_record_fails_closed(self):
+        import evolution_merge_gate as emg
+
+        files = [_f(emg.REPLAY_RECORD_PATH, 4, 0)]
+        out = emg._check_shipped_replay(files, "sha", "O/r", lambda c: (1, "", ""))
+        assert out and out[0].startswith("REPLAY_UNVERIFIED")
+
+    def test_malformed_record_json_fails_closed(self):
+        import base64 as _b64
+        import evolution_merge_gate as emg
+
+        files = [_f(emg.REPLAY_RECORD_PATH, 4, 0)]
+        out = emg._check_shipped_replay(
+            files, "sha", "O/r", lambda c: (0, _b64.b64encode(b"not json").decode(), "")
+        )
+        assert out and "not JSON" in out[0]
+
+    def test_missing_head_fails_closed(self):
+        import evolution_merge_gate as emg
+
+        files = [_f(emg.REPLAY_RECORD_PATH, 4, 0)]
+        out = emg._check_shipped_replay(files, None, "O/r", lambda c: (0, "", ""))
+        assert out and out[0].startswith("REPLAY_UNVERIFIED")

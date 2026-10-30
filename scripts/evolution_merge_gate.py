@@ -17,6 +17,12 @@ change genuinely needs a human, not that the heuristic guessed):
   container/infra definitions, secrets, or its OWN enforcement machinery (the
   approval policy, this gate, the cron registrar).
 
+A PR that ships a recorded-input JSON (``.evolution/replay-record.json``,
+#3517) is additionally replayed before the squash: the record and the trace it
+points at are read at the reviewed head SHA, and a replay that fails, cannot run,
+or never finished the session keeps the PR out of the merge path
+(``REPLAY_*`` violations).
+
 When the policy passes, the ``--merge`` mode merges ATOMICALLY: the GitHub merge
 API is handed the reviewed head SHA, so a push that lands between check and merge
 returns 409 and aborts instead of merging unreviewed code.
@@ -40,6 +46,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 # Default cap on total changed lines (additions + deletions) for an unattended
 # self-merge. Overridable via EVOLUTION_MERGE_MAX_LINES.
 DEFAULT_MAX_LINES = 200
+
+# Recorded-input evidence a change may ship for the replay gate (#3517). Its
+# presence on the PR's file list is what turns the replay step on.
+REPLAY_RECORD_PATH = ".evolution/replay-record.json"
 
 # Globs (matched against the repo-relative path, case-insensitive) the agent must
 # not modify in a self-merged PR. Kept conservative and specific so a normal
@@ -523,6 +533,73 @@ def _fetch_test_contents(
     return contents
 
 
+def _contents_at_head(
+    path: str,
+    head: str | None,
+    slug: str,
+    runner: Callable[[list[str]], tuple[int, str, str]],
+) -> str | None:
+    """Read one repo file's text at the reviewed head SHA, or ``None``."""
+    if not head or not slug:
+        return None
+    code, out, _ = runner([
+        "gh",
+        "api",
+        f"repos/{slug}/contents/{path}?ref={head}",
+        "--jq",
+        ".content",
+    ])
+    if code != 0 or not out.strip():
+        return None
+    try:
+        return base64.b64decode(out).decode("utf-8")
+    except (ValueError, UnicodeError):
+        return None
+
+
+def _check_shipped_replay(
+    files: Sequence[dict[str, Any]],
+    head: str | None,
+    slug: str,
+    runner: Callable[[list[str]], tuple[int, str, str]],
+) -> list[str]:
+    """Replay the recorded-input JSON a PR ships, before the squash (#3517).
+
+    Replaying the change's own validation inputs is only worth anything if the
+    merge path actually consults it — otherwise the gate is dead code. The
+    record and the trace it names are read at ``head`` (the SHA that will
+    merge), so the evidence checked is the evidence that lands.
+
+    A PR without the record is not a replay PR: the step is skipped. When the
+    record IS shipped it fails CLOSED — unreadable record, unreadable trace,
+    failed replay, or a session that never finished all block eligibility.
+    """
+    paths = {
+        f.get("path") for f in files if isinstance(f, dict) and f.get("path")
+    }
+    if REPLAY_RECORD_PATH not in paths:
+        return []
+    raw = _contents_at_head(REPLAY_RECORD_PATH, head, slug, runner)
+    if raw is None:
+        return [
+            f"REPLAY_UNVERIFIED: {REPLAY_RECORD_PATH} shipped but unreadable at the PR head"
+        ]
+    try:
+        record = json.loads(raw)
+    except ValueError as exc:
+        return [f"REPLAY_UNVERIFIED: {REPLAY_RECORD_PATH} is not JSON: {exc}"]
+    if not isinstance(record, dict):
+        return [f"REPLAY_UNVERIFIED: {REPLAY_RECORD_PATH} is not a JSON object"]
+    try:
+        from evolution_replay_gate import check_shipped_record
+    except ImportError as exc:  # fail closed: a missing gate cannot certify
+        return [f"REPLAY_UNVERIFIED: replay gate unavailable: {exc}"]
+    return check_shipped_record(
+        record,
+        read_text=lambda path: _contents_at_head(path, head, slug, runner),
+    )
+
+
 def _load_json_file(path: str) -> Optional[Dict[str, Any]]:
     """Load a JSON object from ``path``; return ``None`` on any error."""
     try:
@@ -612,6 +689,12 @@ def main(argv: List[str]) -> int:
         from evolution_admission import verify_receipt
         admission, admission_errors = verify_receipt(files, head, slug, runner)
         violations.extend(admission_errors)
+    # Replay certification for a PR that ships recorded inputs (#3517): the
+    # record is read at the reviewed head SHA, so a replay that misses its
+    # recorded grade removes the PR from the merge path instead of being
+    # reported and ignored.
+    replay_violations = _check_shipped_replay(files, head, slug, runner)
+    violations.extend(replay_violations)
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
         for v in violations:
