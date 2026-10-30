@@ -46,6 +46,7 @@ import re
 import sqlite3
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -448,6 +449,70 @@ def _iter_lines(path: Path):
 
 # Keep the id on DB-derived message dicts so _state_db_session_signals can re-sort.
 _MESSAGE_ROW_ID_KEY = "_db_id"
+# Set when a SessionDB row carried a timestamp value that could not be read as a
+# point in time (#3538). Kept on the message so the freshness decision can tell
+# "this store has no timestamps" from "this store has timestamps we failed to
+# parse" -- the second one fell back to the database file's mtime and skipped
+# every session, which reads downstream as a quiet ``sessions_scanned: 0``.
+_MESSAGE_ROW_UNDATED_KEY = "_db_undated"
+
+_ISO_TS_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})"
+    r"(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?"
+    r"\s*(Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def _parse_timestamp(value: Any) -> Optional[float]:
+    """Read a SessionDB ``messages.timestamp`` value as epoch seconds (#3538).
+
+    The column is declared REAL, but installs that migrated from a JSONL store
+    or wrote through a platform adapter also carry ISO-8601 strings, numeric
+    strings or date-only values. ``float(value)`` covered only some of those and
+    the ``ValueError`` was swallowed, so the timestamp silently vanished; a
+    session without any parsed timestamp was then judged by the database file's
+    mtime instead of its own age. Returns None for anything we do not actually
+    understand -- the caller records that rather than guessing.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    match = _ISO_TS_RE.match(text)
+    if match is None:
+        return None
+    year, month, day, hour, minute, second, frac, offset = match.groups()
+    try:
+        parsed = datetime(
+            int(year),
+            int(month),
+            int(day),
+            int(hour or 0),
+            int(minute or 0),
+            int(second or 0),
+            int((frac or "0").ljust(6, "0")[:6]),
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return None
+    if offset and offset != "Z":
+        sign = 1 if offset[0] == "+" else -1
+        digits = offset[1:].replace(":", "")
+        try:
+            delta = timedelta(hours=int(digits[:2]), minutes=int(digits[2:]))
+        except (ValueError, IndexError):
+            return None
+        parsed = parsed - sign * delta
+    return parsed.timestamp()
 
 
 def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
@@ -471,10 +536,11 @@ def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     if "tool_name" in row.keys():
         obj["tool_name"] = row["tool_name"]
     if "timestamp" in row.keys() and row["timestamp"] is not None:
-        try:
-            obj["timestamp"] = float(row["timestamp"])
-        except (ValueError, TypeError):
-            pass
+        parsed_ts = _parse_timestamp(row["timestamp"])
+        if parsed_ts is None:
+            obj[_MESSAGE_ROW_UNDATED_KEY] = True
+        else:
+            obj["timestamp"] = parsed_ts
     return obj if obj.get("role") else None
 
 
@@ -717,6 +783,7 @@ def build_digest(
     models: Counter = Counter()
     repeated: Dict[str, Dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
     scanned = 0
+    undated = 0  # SessionDB sessions whose timestamps we could not read (#3538)
     all_step_annotations: List[Dict[str, Any]] = []
 
     def _aggregate(s: Dict[str, Any]) -> None:
@@ -804,6 +871,13 @@ def build_digest(
                     if has_ts:
                         if not any(m.get("timestamp", 0) >= cutoff for m in msgs):
                             continue
+                    elif any(m.get(_MESSAGE_ROW_UNDATED_KEY) for m in msgs):
+                        # The store does carry timestamps; we just could not read
+                        # them (#3538). Falling back to the database file mtime is
+                        # what turned a parsing gap into a silent
+                        # "sessions_scanned: 0", so count the session and let the
+                        # digest say how many were undated.
+                        undated += 1
                     elif not _fresh(db_path, cutoff):
                         continue
                     scanned += 1
@@ -853,6 +927,7 @@ def build_digest(
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
+        "sessions_undated": undated,
         "signals": {
             "tool_failures": tool_failures,
             "tool_failures_by_reason": failures_by_reason,
