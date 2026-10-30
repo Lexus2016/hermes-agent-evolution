@@ -194,7 +194,7 @@ def _sdk_request_model(method: str, params: dict[str, Any]) -> Any | None:
     """
     try:
         from mcp import types  # late: keeps the SDK import lazy
-    except Exception:  # pragma: no cover - the agent always runs with the SDK
+    except ImportError:  # pragma: no cover - the agent always runs with the SDK
         return None
     try:
         request_cls = types.Request[dict[str, Any], str]
@@ -202,7 +202,7 @@ def _sdk_request_model(method: str, params: dict[str, Any]) -> Any | None:
         return None
     try:
         return request_cls(method=method, params=dict(params))
-    except Exception:  # pragma: no cover - defensive: never block the raw path
+    except (TypeError, ValueError):  # pragma: no cover - never block the raw path
         return None
 
 
@@ -214,10 +214,9 @@ def _raw_result_adapter() -> Any | None:
     """
     try:
         from pydantic import TypeAdapter
-
-        return TypeAdapter(dict)
-    except Exception:  # pragma: no cover
+    except ImportError:  # pragma: no cover
         return None
+    return TypeAdapter(dict)
 
 
 async def _call_send_request(session: Any, request: Any, result_type: Any = None) -> Any:
