@@ -12,6 +12,7 @@ Implements the MCP Tasks extension (io.modelcontextprotocol/tasks):
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import random
@@ -177,6 +178,73 @@ def extract_task_info(result: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
+def _sdk_request_model(method: str, params: dict[str, Any]) -> Any | None:
+    """Wrap a raw RPC in the pydantic request model ``send_request`` requires (#3543).
+
+    ``ClientSession.send_request`` opens with ``request.model_dump(...)``, so a plain
+    dict dies with ``AttributeError: 'dict' object has no attribute 'model_dump'``
+    before the frame reaches the wire - which is how every ``tasks/get`` poll failed
+    from 2026-10-15 on. ``types.Request[dict[str, Any], str]`` is the SDK's generic
+    JSON-RPC request base: it carries ``method``/``params`` unchanged, so a method with
+    no typed wrapper in this SDK build (``tasks/*`` on older ones) still serialises
+    intact instead of being coerced into an empty params model.
+
+    Returns ``None`` when the installed SDK has no such model, so the caller keeps the
+    raw-envelope path for sessions that predate the typed API.
+    """
+    try:
+        from mcp import types  # late: keeps the SDK import lazy
+    except Exception:  # pragma: no cover - the agent always runs with the SDK
+        return None
+    try:
+        request_cls = types.Request[dict[str, Any], str]
+    except (AttributeError, TypeError):  # pragma: no cover - pre-generic SDK
+        return None
+    try:
+        return request_cls(method=method, params=dict(params))
+    except Exception:  # pragma: no cover - defensive: never block the raw path
+        return None
+
+
+def _raw_result_adapter() -> Any | None:
+    """Result type that hands the response back as the SDK received it (``dict``).
+
+    ``send_request`` closes with ``result_type.model_validate(raw)``, so the ``Any`` it
+    was given before could not have worked either.
+    """
+    try:
+        from pydantic import TypeAdapter
+
+        return TypeAdapter(dict)
+    except Exception:  # pragma: no cover
+        return None
+
+
+async def _call_send_request(session: Any, request: Any, result_type: Any = None) -> Any:
+    """Call ``send_request`` in the arity this session exposes (typed SDK takes two args)."""
+    fn = session.send_request
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):  # C callables, some mocks
+        sig = None
+    if sig is not None:
+        positional = [
+            p
+            for p in sig.parameters.values()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+        takes_varargs = any(p.kind is p.VAR_POSITIONAL for p in sig.parameters.values())
+        if result_type is not None and (len(positional) >= 2 or takes_varargs):
+            return await fn(request, result_type)
+        return await fn(request)
+    if result_type is None:
+        return await fn(request)
+    try:
+        return await fn(request, result_type)
+    except TypeError:
+        return await fn(request)
+
+
 async def send_mcp_rpc_request(
     session: Any, method: str, params: Dict[str, Any]
 ) -> Any:
@@ -186,24 +254,20 @@ async def send_mcp_rpc_request(
 
     # 1. If session has send_request (official MCP SDK pattern)
     if hasattr(session, "send_request"):
-        try:
-            return await session.send_request(
-                {
-                    "jsonrpc": "2.0",
-                    "method": method,
-                    "params": params,
-                    "id": 0,
-                },
-                Any,
-            )
-        except TypeError:
-            # Fallback without result_type if send_request takes 1 arg
-            return await session.send_request({
+        request = _sdk_request_model(method, params)
+        if request is not None:
+            return await _call_send_request(session, request, _raw_result_adapter())
+        # An SDK build without the generic request model is the only writer that
+        # takes the bare JSON-RPC envelope.
+        return await _call_send_request(
+            session,
+            {
                 "jsonrpc": "2.0",
                 "method": method,
                 "params": params,
                 "id": 0,
-            })
+            },
+        )
 
     # 2. Direct named method fallback (e.g. session.tasks_get)
     clean_method = method.replace("/", "_")
