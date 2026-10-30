@@ -373,14 +373,20 @@ def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
     return TrajectoryLog.from_dict(data)
 
 
-def iter_trajectories(path: Path) -> List[TrajectoryLog]:
+def iter_trajectories(path: Path, *, strict: bool = False) -> List[TrajectoryLog]:
     """Load every trajectory in a file, in order — both storage formats.
 
     ``save()`` writes one pretty-printed JSON object (``.json``);
     ``append()`` writes one compact JSON object per line (``.jsonl``) so a
     multi-turn session keeps every turn. Whole-file parse is tried first
     (covers the .json format), then line-by-line (covers .jsonl). Malformed
-    lines are skipped — a torn write must never take a replay down (#85)."""
+    lines are skipped — a torn write must never take a replay down (#85).
+
+    ``strict=True`` is for callers that CERTIFY a session instead of inspecting
+    it (the replay gate, #3517): a torn line there means a turn was never
+    replayed, so it raises ``ValueError`` naming the line instead of returning a
+    partial session. Trace inspection keeps the best-effort default.
+    """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
@@ -397,16 +403,21 @@ def iter_trajectories(path: Path) -> List[TrajectoryLog]:
         pass
     # JSONL append format: one compact object per line.
     logs: List[TrajectoryLog] = []
-    for line in raw.splitlines():
+    for lineno, line in enumerate(raw.splitlines(), start=1):
         s = line.strip()
         if not s:
             continue
         try:
             data = json.loads(s)
-        except ValueError:
+        except ValueError as exc:
+            if strict:
+                raise ValueError(f"malformed trajectory line {lineno} in {path}: {exc}")
             continue
-        if isinstance(data, dict):
-            logs.append(TrajectoryLog.from_dict(data))
+        if not isinstance(data, dict):
+            if strict:
+                raise ValueError(f"trajectory line {lineno} in {path} is not a JSON object")
+            continue
+        logs.append(TrajectoryLog.from_dict(data))
     return logs
 
 
