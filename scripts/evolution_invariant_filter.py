@@ -26,10 +26,11 @@ Slices shipped here:
     blocking on low-stakes ones — with zero behavior change for existing rules.
   * **Slice 5** (#3518, pinned invariant core) — the default load reads the
     rules from a pinned copy OUTSIDE the agent-writable tree
-    (``~/.hermes/evolution/pinned/``, override: ``$EVOLUTION_PINNED_RULES``),
-    copied there once at deploy time. The filter refuses
-    to run when that surface is missing or shadowed by an in-tree copy, so a
-    self-edit cannot weaken the rules it is judged against.
+    (``$HERMES_HOME/evolution/pinned/``, override:
+    ``$EVOLUTION_PINNED_RULES``). Seed it once per host/deploy with
+    ``python scripts/evolution_invariant_filter.py --install-pinned``. The filter refuses to run when that surface is missing
+    or shadowed by an in-tree copy, so a self-edit cannot weaken the rules it is
+    judged against.
   * **Slice 4** (pinned safe-fallback set) — ``load_safe_fallbacks`` /
     ``resolve_pinned_fallback`` expose a versioned ``safe_fallbacks`` set of
     human-vetted, pinned alternative targets. When a proposal is blocked on a
@@ -70,11 +71,23 @@ _RULES_FILENAME = "evolution_invariant_rules.json"
 
 # Slice 5 (#3518): the rules the filter judges against live OUTSIDE the tree
 # the agent commits to, so a self-edit cannot weaken the checks that govern it.
-_PINNED_RULES_DIR = Path.home() / ".hermes" / "evolution" / "pinned"
 _SHADOW_NAMES = (
     "evolution_invariant_rules.in-tree.json",
     "evolution_invariant_rules.override.json",
 )
+
+
+def _pinned_dir() -> Path:
+    """Pinned-rules directory: ``$HERMES_HOME/evolution/pinned``, else
+    ``~/.hermes/evolution/pinned``.
+
+    Host-level, not per-profile (``$EVOLUTION_PROFILE_DIR`` is deliberately
+    ignored): one host judges every profile against the same rulebook, and a
+    profile-scoped copy would be one more place to weaken it. Never inside the
+    checkout: that is the whole point.
+    """
+    home = os.environ.get("HERMES_HOME", "").strip() or str(Path.home() / ".hermes")
+    return Path(home) / "evolution" / "pinned"
 
 
 def pinned_rules_path() -> Path:
@@ -82,7 +95,33 @@ def pinned_rules_path() -> Path:
     override = os.environ.get("EVOLUTION_PINNED_RULES", "").strip()
     if override:
         return Path(override)
-    return _PINNED_RULES_DIR / _RULES_FILENAME
+    return _pinned_dir() / _RULES_FILENAME
+
+
+def install_pinned_rules(
+    source: Optional[Path] = None, *, force: bool = False
+) -> Path:
+    """Copy the in-tree rules seed onto the pinned surface (deploy-time step).
+
+    Idempotent: an existing pinned file with identical bytes is left untouched,
+    one with different bytes is refused unless ``force``. The default load never
+    seeds itself — seeding on demand would let a rewritten in-tree copy become
+    the rulebook, which is exactly what this slice removes.
+    """
+    seed = Path(source) if source is not None else _rules_path()
+    if not seed.is_file():
+        raise ValueError(f"in-tree invariant rules seed missing at {seed}")
+    target = pinned_rules_path()
+    if target.is_file() and not force:
+        if target.read_bytes() == seed.read_bytes():
+            return target
+        raise ValueError(
+            f"pinned invariant surface at {target} differs from the in-tree seed "
+            f"{seed}; pass force=True to replace it"
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(seed.read_bytes())
+    return target
 
 
 def _assert_not_shadowed(pinned: Path) -> None:
@@ -101,8 +140,9 @@ def _resolve_rules_file() -> Path:
     _assert_not_shadowed(pinned)
     if not pinned.is_file():
         raise ValueError(
-            f"pinned invariant surface missing at {pinned} - copy the in-tree "
-            f"rules file there once at deploy time"
+            f"pinned invariant surface missing at {pinned} - run "
+            f"'python scripts/evolution_invariant_filter.py --install-pinned' on "
+            f"this host (or set $EVOLUTION_PINNED_RULES)"
         )
     return pinned
 
@@ -507,6 +547,16 @@ def _load_proposal(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
 
 def main(argv: List[str]) -> int:
     positional = [a for a in argv[1:] if not a.startswith("-")]
+    if "--install-pinned" in argv[1:]:
+        try:
+            target = install_pinned_rules()
+        except ValueError as exc:
+            print(f"[evolution-invariant-filter] {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"[evolution-invariant-filter] pinned invariant rules installed at {target}"
+        )
+        return 0
     path = positional[0] if positional else None
     proposal, err = _load_proposal(path)
     if err:

@@ -24,6 +24,27 @@ from evolution_harness_gate import (  # noqa: E402
 )
 from evolution_harness_sandbox import GateResult  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _deployed_pinned_invariant_surface(tmp_path, monkeypatch):
+    """Simulate a deployed host: the pinned invariant surface (#3518) is seeded.
+
+    The gate screens every proposal with ``check_proposal``, whose default load
+    reads the rules from OUTSIDE the checkout and fails closed when the surface
+    is missing. A deployed host seeds it once with
+    ``python scripts/evolution_invariant_filter.py --install-pinned``; these
+    tests do the same into a temp dir so the gate has a rulebook to judge with.
+    """
+    import shutil
+
+    pinned = tmp_path / "pinned" / "evolution_invariant_rules.json"
+    pinned.parent.mkdir()
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / "scripts" / "evolution_invariant_rules.json",
+        pinned,
+    )
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+
 SURFACE = {
     "retry_count": 10,
     "backoff": {"base_delay_sec": 1.0, "multiplier": 2.0, "max_delay_sec": 60.0},

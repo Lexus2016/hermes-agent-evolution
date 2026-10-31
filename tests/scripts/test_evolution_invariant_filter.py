@@ -13,7 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_invariant_filter import (  # noqa: E402
+from evolution_invariant_filter import (
+    install_pinned_rules,
+    pinned_rules_path,  # noqa: E402
     _rules_path,
     check_proposal,
     classify_stakes,
@@ -384,3 +386,47 @@ def test_shadowed_pinned_surface_fails_closed(tmp_path, monkeypatch):
     shadow.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="shadowed"):
         mod.load_invariant_rules()
+
+
+def test_install_pinned_rules_seeds_a_missing_surface(tmp_path, monkeypatch):
+    """The deploy step creates the surface the default load requires."""
+    import evolution_invariant_filter as mod
+
+    target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    assert not target.is_file()
+
+    installed = install_pinned_rules()
+
+    assert installed == target
+    assert target.read_bytes() == mod._rules_path().read_bytes()
+    rules = mod.load_invariant_rules()
+    assert rules["version"] >= 1
+    assert rules["rules_source"] == str(target)
+
+
+def test_install_pinned_rules_is_idempotent_and_refuses_divergence(tmp_path, monkeypatch):
+    target = tmp_path / "pinned" / "evolution_invariant_rules.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    install_pinned_rules()
+    first = target.read_bytes()
+
+    install_pinned_rules()  # same bytes -> no-op, no force needed
+    assert target.read_bytes() == first
+
+    target.write_text('{"version": 1, "rules": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="differs from the in-tree seed"):
+        install_pinned_rules()
+    install_pinned_rules(force=True)
+    assert target.read_bytes() == first
+
+
+def test_pinned_path_follows_hermes_home_and_ignores_the_profile(tmp_path, monkeypatch):
+    """Host-level resolution: ``$HERMES_HOME``, never a per-profile root."""
+    monkeypatch.delenv("EVOLUTION_PINNED_RULES", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    expected = tmp_path / "home" / "evolution" / "pinned" / "evolution_invariant_rules.json"
+    assert pinned_rules_path() == expected
+
+    monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path / "profile"))
+    assert pinned_rules_path() == expected
