@@ -112,3 +112,51 @@ def test_response_between_restarts_resets_the_bound(flag):
         restart_count = verdict.restart_count
     assert actions == ["continue"] * (3 * MAX_RETRIES)
     assert agent.steered == []
+
+
+# -- residual-budget certification (#3540) ------------------------------------
+#
+# A bad-run signal restarts the stalled attempt only when the trace sample is
+# large enough to certify the replacement's residual-budget value. Below the
+# threshold the restart is refused (abstain) and the residual budget is logged.
+
+
+def test_uncertified_sample_refuses_the_rebuilt_restart(caplog):
+    """A high-accuracy bad-run signal does NOT restart when the trace sample
+    is below the stated threshold: the iteration budget stays unrefunded."""
+    import logging
+
+    agent = _agent()
+    agent.trace_sample_size = 5  # below the default threshold of 30
+    agent.iteration_budget.remaining = 7
+    with caplog.at_level(logging.INFO, logger="agent.conversation_loop"):
+        verdict = _apply(agent, "restart_with_rebuilt_messages", restart_count=0)
+    assert verdict.action == "break"
+    assert verdict._turn_exit_reason == "residual_budget_uncertified"
+    assert agent.iteration_budget.refunds == 0  # the restart was refused
+    assert "Residual budget 7" in caplog.text
+    assert "trace sample 5" in caplog.text
+
+
+def test_certified_sample_keeps_the_restart():
+    """At or above the threshold the current restart behaviour is unchanged."""
+    agent = _agent()
+    agent.trace_sample_size = 30
+    verdict = _apply(agent, "restart_with_rebuilt_messages", restart_count=0)
+    assert verdict.action == "continue"
+    assert agent.iteration_budget.refunds == 1
+
+
+def test_absent_sample_keeps_current_behaviour():
+    """No sample recorded (every caller today) means abstain does not apply."""
+    agent = _agent()
+    verdict = _apply(agent, "restart_with_rebuilt_messages", restart_count=0)
+    assert verdict.action == "continue"
+
+
+def test_redirect_restart_is_not_gated():
+    """The abstain gate covers the stalled-run restart only, not redirects."""
+    agent = _agent()
+    agent.trace_sample_size = 1
+    verdict = _apply(agent, "restart_with_redirected_messages", restart_count=0)
+    assert verdict.action == "continue"
