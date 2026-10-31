@@ -13,7 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_invariant_filter import (  # noqa: E402
+from evolution_invariant_filter import (
+    install_pinned_rules,
+    pinned_rules_path,  # noqa: E402
     _rules_path,
     check_proposal,
     classify_stakes,
@@ -110,7 +112,9 @@ def test_filter_proposals_splits():
 def test_missing_rules_file_fails_closed(monkeypatch):
     import evolution_invariant_filter as mod
 
-    monkeypatch.setattr(mod, "_rules_path", lambda: Path("/nonexistent/rules.json"))
+    monkeypatch.setenv(
+        "EVOLUTION_PINNED_RULES", str(Path("/nonexistent/pinned/rules.json"))
+    )
     result = check_proposal(CLEAN, rules=None)
     assert result["ok"] is False
     assert any(v["rule"] == "rules-unavailable" for v in result["violations"])
@@ -245,7 +249,9 @@ def test_staged_rule_blocks_when_threshold_met():
         "forbidden_fragments": ["staging-target"],
     }
     rendered = {"version": 1, "rules": [staged_rule]}
-    result = check_proposal({**CLEAN, "path": "scripts/staging-target.py"}, rules=rendered)
+    result = check_proposal(
+        {**CLEAN, "path": "scripts/staging-target.py"}, rules=rendered
+    )
     assert result["ok"] is False
     assert any(v["rule"] == "staged-rule" for v in result["violations"])
 
@@ -284,3 +290,143 @@ def test_safe_fallback_absent_for_unpinned_block():
 def test_resolve_pinned_fallback_none_when_no_blocking_path():
     assert resolve_pinned_fallback(CLEAN) is None
     assert resolve_pinned_fallback({"path": "scripts/evolution_foo.py"}) is None
+
+
+# -- Slice 5 (#3518): pinned invariant core outside the agent-writable tree --
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_pinned_surface(tmp_path, monkeypatch):
+    """Hermetic pinned surface: temp copy of the shipped rules, outside any
+    checkout, via $EVOLUTION_PINNED_RULES. No test touches the real file."""
+    import shutil
+
+    pinned = tmp_path / "pinned" / "evolution_invariant_rules.json"
+    pinned.parent.mkdir()
+    shutil.copyfile(_rules_path(), pinned)
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+
+
+def _pinned_rules(tmp_path, monkeypatch):
+    """Install a minimal pinned rules file OUTSIDE the tree."""
+    import json as _json
+
+    pinned = tmp_path / "pinned" / "evolution_invariant_rules.json"
+    pinned.parent.mkdir(exist_ok=True)
+    pinned.write_text(
+        _json.dumps(
+            {
+                "version": 9,
+                "rules": [
+                    {"id": "pinned-rule", "severity": "hard", "check": "human_gating"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+    return pinned
+
+
+def test_pinned_rules_win_over_rewritten_in_tree_copy(tmp_path, monkeypatch):
+    # A self-edit rewrites the in-tree rules file. The filter must keep judging
+    # against the PINNED copy: the rewritten in-tree rule never fires.
+    import json as _json
+
+    import evolution_invariant_filter as mod
+
+    pinned = _pinned_rules(tmp_path, monkeypatch)
+    rewritten = tmp_path / "tree" / "evolution_invariant_rules.json"
+    rewritten.parent.mkdir()
+    rewritten.write_text(
+        _json.dumps(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "rewritten-rule",
+                        "severity": "hard",
+                        "check": "forbidden_patterns",
+                        "patterns": ["harmless"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "_rules_path", lambda: rewritten)
+
+    rules = mod.load_invariant_rules()
+    assert rules["version"] == 9
+    assert rules["rules"][0]["id"] == "pinned-rule"
+    assert rules["rules_source"] == str(pinned)
+
+    # The in-tree rewrite would reject "harmless"; the pinned rules do not.
+    result = check_proposal({**CLEAN, "delta": "harmless change"})
+    assert result["ok"] is True
+
+
+def test_missing_pinned_surface_fails_closed(tmp_path, monkeypatch):
+    import evolution_invariant_filter as mod
+
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(tmp_path / "absent.json"))
+    with pytest.raises(ValueError, match="pinned invariant surface missing"):
+        mod.load_invariant_rules()
+    result = check_proposal(CLEAN, rules=None)
+    assert result["ok"] is False
+    assert any(v["rule"] == "rules-unavailable" for v in result["violations"])
+
+
+def test_shadowed_pinned_surface_fails_closed(tmp_path, monkeypatch):
+    # An in-tree copy sitting NEXT TO the pinned file shadows it: refuse to run.
+    import evolution_invariant_filter as mod
+
+    pinned = _pinned_rules(tmp_path, monkeypatch)
+    shadow = pinned.parent / "evolution_invariant_rules.in-tree.json"
+    shadow.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="shadowed"):
+        mod.load_invariant_rules()
+
+
+def test_install_pinned_rules_seeds_a_missing_surface(tmp_path, monkeypatch):
+    """The deploy step creates the surface the default load requires."""
+    import evolution_invariant_filter as mod
+
+    target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    assert not target.is_file()
+
+    installed = install_pinned_rules()
+
+    assert installed == target
+    assert target.read_bytes() == mod._rules_path().read_bytes()
+    rules = mod.load_invariant_rules()
+    assert rules["version"] >= 1
+    assert rules["rules_source"] == str(target)
+
+
+def test_install_pinned_rules_is_idempotent_and_refuses_divergence(tmp_path, monkeypatch):
+    target = tmp_path / "pinned" / "evolution_invariant_rules.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    install_pinned_rules()
+    first = target.read_bytes()
+
+    install_pinned_rules()  # same bytes -> no-op, no force needed
+    assert target.read_bytes() == first
+
+    target.write_text('{"version": 1, "rules": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="differs from the in-tree seed"):
+        install_pinned_rules()
+    install_pinned_rules(force=True)
+    assert target.read_bytes() == first
+
+
+def test_pinned_path_follows_hermes_home_and_ignores_the_profile(tmp_path, monkeypatch):
+    """Host-level resolution: ``$HERMES_HOME``, never a per-profile root."""
+    monkeypatch.delenv("EVOLUTION_PINNED_RULES", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    expected = tmp_path / "home" / "evolution" / "pinned" / "evolution_invariant_rules.json"
+    assert pinned_rules_path() == expected
+
+    monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path / "profile"))
+    assert pinned_rules_path() == expected
