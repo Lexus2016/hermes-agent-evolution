@@ -402,6 +402,23 @@ except Exception:
 PYEOF
 fi
 
+# --- Evolution: pinned invariant surface (#3518) ----------------------------
+# The invariant filter judges self-edits against a copy of the rules that lives
+# OUTSIDE this checkout ($HERMES_HOME/evolution/pinned/), so an edit cannot
+# weaken the checks that govern it. A fresh install must seed that copy itself;
+# otherwise every proposal comes back rules-unavailable until someone runs the
+# manual command. Idempotent and fail-closed: an existing pinned file that
+# differs from the seed is left untouched and the warning says why.
+if [ "${HERMES_NO_PINNED_SEED:-0}" != "1" ]; then
+    echo "📌 Seeding the pinned evolution invariant surface..."
+    if "$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/scripts/evolution_invariant_filter.py" --install-seed; then
+        echo "✅ Pinned invariant surface ready."
+    else
+        echo "⚠️  Pinned invariant surface was not seeded — the evolution filter will fail closed until it is."
+    fi
+    echo ""
+fi
+
 # Ask if they want to run setup wizard now
 read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
 echo

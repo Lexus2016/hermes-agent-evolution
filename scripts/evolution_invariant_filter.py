@@ -27,8 +27,10 @@ Slices shipped here:
   * **Slice 5** (#3518, pinned invariant core) — the default load reads the
     rules from a pinned copy OUTSIDE the agent-writable tree
     (``$HERMES_HOME/evolution/pinned/``, override:
-    ``$EVOLUTION_PINNED_RULES``). Seed it once per host/deploy with
-    ``python scripts/evolution_invariant_filter.py --install-pinned``. The filter refuses to run when that surface is missing
+    ``$EVOLUTION_PINNED_RULES``). A deploy seeds it automatically: ``hermes
+    update`` and ``setup-hermes.sh`` call ``install_pinned_seed``. The manual
+    ``python scripts/evolution_invariant_filter.py --install-pinned`` remains for
+    hosts that do neither. The filter refuses to run when that surface is missing
     or shadowed by an in-tree copy, so a self-edit cannot weaken the rules it is
     judged against.
   * **Slice 4** (pinned safe-fallback set) — ``load_safe_fallbacks`` /
@@ -96,6 +98,17 @@ def pinned_rules_path() -> Path:
     if override:
         return Path(override)
     return _pinned_dir() / _RULES_FILENAME
+
+
+def install_pinned_seed(*, force: bool = False) -> List[Path]:
+    """Seed every pinned surface a deploy owes the host.
+
+    Today that is the invariant rulebook. The evidence gate, the security rules
+    and the evolution stage contracts have no versioned data file of their own
+    yet — their logic is code — so they are NOT pinned here; a comment in the
+    merge brief tracks them as the next increment. Returns the paths written.
+    """
+    return [install_pinned_rules(force=force)]
 
 
 def install_pinned_rules(
@@ -556,6 +569,16 @@ def main(argv: List[str]) -> int:
         print(
             f"[evolution-invariant-filter] pinned invariant rules installed at {target}"
         )
+        return 0
+    if "--install-seed" in argv[1:]:
+        # Deploy entry point: seeds every pinned surface, not just the rulebook.
+        try:
+            targets = install_pinned_seed()
+        except ValueError as exc:
+            print(f"[evolution-invariant-filter] {exc}", file=sys.stderr)
+            return 2
+        for target in targets:
+            print(f"[evolution-invariant-filter] pinned surface installed at {target}")
         return 0
     path = positional[0] if positional else None
     proposal, err = _load_proposal(path)
