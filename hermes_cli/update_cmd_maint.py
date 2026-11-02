@@ -953,6 +953,27 @@ def _print_checkpoint_footprint_notice() -> None:
         print(f"\n\033[1;33mℹ  {notice}\033[0m")
 
 
+def _seed_pinned_invariant_surface() -> None:
+    """Seed the pinned rulebook a deploy owes the host (#3518).
+
+    A fresh or updated host must be able to judge self-edits without anyone
+    running the manual seed command. Idempotent and fail-closed on divergence,
+    so a rewritten in-tree copy can never replace the rulebook. Raises on a
+    seed problem; the caller wraps it in ``_best_effort`` so an update survives.
+    """
+    from hermes_cli.update_cmd import _m
+
+    scripts = _m().PROJECT_ROOT / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from evolution_invariant_filter import install_pinned_seed
+
+    print()
+    print("→ Seeding the pinned evolution invariant surface...")
+    for target in install_pinned_seed():
+        print(f"  pinned surface ready at {target}")
+
+
 def _print_post_update_notices_and_self_heals() -> None:
     """Best-effort notices (FTS optimize, curator) and self-heals (FHS PATH, ACP launcher,
     Windows bin launchers, cua-driver refresh) that run after the summary."""
@@ -986,6 +1007,7 @@ def _print_post_update_notices_and_self_heals() -> None:
         # generate each profile's relay-plugins.toml instead of leaving exports silently dead.
         ('Relay exporter migration failed: %s', _migrate_relay_exporter_env),
         ('Turbo-Quant Memory configuration failed: %s', _reconcile_tqmemory),
+        ('Pinned evolution invariant surface seed failed: %s', _seed_pinned_invariant_surface),
         ('Evolution cron reconcile failed: %s', lambda: _m()._reconcile_existing_evolution_cron_jobs()),
     ):
         with _best_effort(message):

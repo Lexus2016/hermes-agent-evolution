@@ -69,6 +69,11 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
         shutil.copytree(ROOT / name, source / name, ignore=shutil.ignore_patterns("__pycache__"))
     for name in ("utils.py", "hermes_constants.py", "hermes_yaml.py", "hermes_bootstrap.py", "setup-hermes.sh"):
         shutil.copy2(ROOT / name, source / name)
+    # The deploy-time seed step runs the in-tree filter; a pm install ships
+    # scripts/ with the rest of the checkout, so the fixture must too.
+    (source / "scripts").mkdir()
+    for name in ("evolution_invariant_filter.py", "evolution_invariant_rules.json"):
+        shutil.copy2(ROOT / "scripts" / name, source / "scripts" / name)
     # The CLI's user-facing text resolves through the i18n kernel (agent.i18n + the English catalog);
     # the rest of agent/ stays out so the tail cannot grow a dependency on the agent runtime.
     (source / "agent").mkdir()
@@ -147,6 +152,12 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
     # The developer setup path publishes through the same writer after real PM.
     launcher.unlink()
     run(["bash", str(install / "setup-hermes.sh")])
+    # A fresh pm install provisions no $SCRIPT_DIR/venv, yet it must still seed
+    # the pinned surface the filter judges self-edits against (#3518) - a
+    # printed warning is not a seed.
+    pinned = home / ".hermes" / "evolution" / "pinned" / "evolution_invariant_rules.json"
+    assert pinned.is_file(), sorted(p.name for p in (home / ".hermes").rglob("*") if p.is_file())
+    assert pinned.read_bytes() == (source / "scripts" / "evolution_invariant_rules.json").read_bytes()
     assert json.loads(run([str(launcher), "from setup"]).stdout)["argv"] == ["from setup"]
     # Warm path publication must work with all acquisition inputs unavailable.
     shutil.rmtree(docroot)
