@@ -402,11 +402,50 @@ except Exception:
 PYEOF
 fi
 
-# Ask if they want to run setup wizard now
-read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+# --- Evolution: pinned invariant surface (#3518) ----------------------------
+# The invariant filter judges self-edits against a copy of the rules that lives
+# OUTSIDE this checkout ($HERMES_HOME/evolution/pinned/), so an edit cannot
+# weaken the checks that govern it. A fresh install must seed that copy itself;
+# otherwise every proposal comes back rules-unavailable until someone runs the
+# manual command. Idempotent and fail-closed: an existing pinned file that
+# differs from the seed is left untouched and the warning says why.
+#
+# The interpreter differs by install path: a pip-venv install has
+# $SCRIPT_DIR/venv/bin/python, while the pm/uv install deliberately has no such
+# venv. Prefer the install's own venv when present, else the bootstrap Python
+# that just ran `pm.cli install`, else python3 on PATH. The seed script is
+# stdlib-only, so every one of them can run it.
+seed_python=""
+if [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
+    seed_python="$SCRIPT_DIR/venv/bin/python"
+elif [ -n "${boot_py:-}" ] && [ -x "$boot_py" ]; then
+    seed_python="$boot_py"
+elif command -v python3 >/dev/null 2>&1; then
+    seed_python="$(command -v python3)"
+fi
+
+if [ "${HERMES_NO_PINNED_SEED:-0}" != "1" ]; then
+    echo "📌 Seeding the pinned evolution invariant surface..."
+    # Never flip the installer's exit code: a missing interpreter or a refused
+    # seed is a warning, and the filter keeps failing closed until seeded.
+    if [ -n "$seed_python" ] && [ -f "$SCRIPT_DIR/scripts/evolution_invariant_filter.py" ] \
+        && "$seed_python" "$SCRIPT_DIR/scripts/evolution_invariant_filter.py" --install-seed; then
+        echo "✅ Pinned invariant surface ready."
+    else
+        echo "⚠️  Pinned invariant surface was not seeded — the evolution filter will fail closed until it is."
+    fi
     echo ""
-    # Run directly with venv Python (no activation needed)
-    "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main setup
+fi
+
+# Ask if they want to run setup wizard now. Only when a human is attached: a
+# piped or non-interactive run (installer E2E, CI) must finish cleanly instead
+# of dying on read's EOF status.
+if [ -t 0 ]; then
+    read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+        echo ""
+        # Run directly with venv Python (no activation needed)
+        "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main setup
+    fi
 fi
