@@ -28,30 +28,21 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-DIFF_MARKERS = re.compile(
-    r"(?:^diff --git\s+|^---\s+[ab]/|^\+\+\+\s+[ab]/|^@@\s+-\d+,\d+\s+\+\d+,\d+\s+@@)",
-    re.MULTILINE,
-)
+from evolution_evidence_config import type_patterns
 
-TEST_RESULT_MARKERS = re.compile(
-    r"(?:=+ (?:(?:\d+ passed)|\d+ failed|\d+ skipped|\d+ error) in \d+\.\d+s =+|"
-    r"collected \d+ items|"
-    r"=== Summary: \d+ files?, \d+ tests? passed|"
-    r"\[\s*\d+%\s*\|\s*\d+/\d+\s*\|\s*✓\d+\s*\]|"
-    r"\d+ passed(?:, \d+ skipped)? in \d+\.\d+s|"
-    r"test session starts)",
-    re.MULTILINE,
-)
+# Markers + the claim→evidence map come from the PINNED evidence-gate surface
+# (#3567). Resolved lazily so a rewritten in-tree copy can never loosen them and
+# a missing or shadowed surface fails closed when a gate function runs.
+_TYPE: dict | None = None
 
-COMMAND_OUTPUT_MARKERS = re.compile(
-    r"(?:Command (?:exited with code \d+|completed with exit code \d+)|"
-    r"Exit code:\s*\d+|"
-    r"(?:^total \d+\n[d-][rwx-]{9})|"
-    r"(?:^\$ [^\n]+\n))",
-    re.MULTILINE,
-)
+
+def _type() -> dict:
+    global _TYPE
+    if _TYPE is None:
+        _TYPE = type_patterns()
+    return _TYPE
 
 
 def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str:
@@ -62,15 +53,15 @@ def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str
     text = evidence.strip()
 
     # Test runner output takes precedence if present
-    if TEST_RESULT_MARKERS.search(text):
+    if _type()["test_result"].search(text):
         return "test_result"
 
     # Unified diff format
-    if DIFF_MARKERS.search(text):
+    if _type()["diff"].search(text):
         return "diff"
 
     # Command execution output trace
-    if COMMAND_OUTPUT_MARKERS.search(text):
+    if _type()["command_output"].search(text):
         return "command_output"
 
     # File reference check on disk
@@ -86,13 +77,12 @@ def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str
     return "description_only"
 
 
-EXPECTED_EVIDENCE_MAP: Dict[str, Set[str]] = {
-    "code_change": {"diff", "file_reference"},
-    "command_run": {"command_output", "test_result"},
-    "test_pass": {"test_result"},
-    "bug_fix": {"test_result", "diff"},
-    "issue_closure": {"test_result", "diff", "file_reference"},
-}
+def _expected_map() -> dict[str, set[str]]:
+    return _type()["expected"]
+
+
+def _closure_overrides() -> dict[str, set[str]]:
+    return _type()["closure_overrides"]
 
 
 def evaluate_claim(
@@ -101,13 +91,13 @@ def evaluate_claim(
     statement: str = "",
     closure_reason: Optional[str] = None,
     repo_root: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate a single claim against evidence requirements.
 
     Returns a dict with 'valid': bool, 'error': str | None, and diagnostic fields.
     """
     claim_norm = claim_type.strip().lower()
-    if claim_norm not in EXPECTED_EVIDENCE_MAP:
+    if claim_norm not in _expected_map():
         return {
             "valid": False,
             "error": "unknown_claim_type",
@@ -116,15 +106,13 @@ def evaluate_claim(
         }
 
     detected_type = detect_evidence_type(evidence, repo_root=repo_root)
-    allowed_types = set(EXPECTED_EVIDENCE_MAP[claim_norm])
+    allowed_types = set(_expected_map()[claim_norm])
 
-    # Special handling for issue closures
+    # Closure reasons narrow the acceptable evidence; the table is pinned data.
     if claim_norm == "issue_closure" and closure_reason:
         reason_norm = closure_reason.strip().lower()
-        if reason_norm in ("already-exists", "already_implemented"):
-            allowed_types = {"file_reference"}
-        elif reason_norm in ("completed", "fixed"):
-            allowed_types = {"test_result", "diff"}
+        if reason_norm in _closure_overrides():
+            allowed_types = set(_closure_overrides()[reason_norm])
 
     if detected_type not in allowed_types:
         return {
@@ -149,7 +137,7 @@ def evaluate_claim(
     }
 
 
-def audit_destructive_paths(repo_root: Path) -> Dict[str, Any]:
+def audit_destructive_paths(repo_root: Path) -> dict[str, Any]:
     """Audit safety gates for multi-path destructive file operations (#3507).
 
     DefuzeX documents a critical defect class where one path (e.g. terminal rm)
@@ -168,7 +156,7 @@ def audit_destructive_paths(repo_root: Path) -> Dict[str, Any]:
         ("move_file", "get_write_denied_error"),
     ]
 
-    missing: List[str] = []
+    missing: list[str] = []
     for method, guard in required_checks:
         pattern = rf"def {method}\s*\([^)]*\)\s*(?:->[^:]+)?:[\s\S]*?{guard}"
         if not re.search(pattern, content):
@@ -186,7 +174,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--claim-type",
-        choices=["code_change", "command_run", "test_pass", "bug_fix", "issue_closure"],
+        choices=sorted(_expected_map()),
         help="Type of claim being verified",
     )
     parser.add_argument("--statement", default="", help="Claim statement text")
@@ -213,7 +201,10 @@ def main() -> int:
     evidence_text = args.evidence
     if args.evidence_file:
         if not args.evidence_file.exists():
-            print(f"Error: evidence file '{args.evidence_file}' not found.", file=sys.stderr)
+            print(
+                f"Error: evidence file '{args.evidence_file}' not found.",
+                file=sys.stderr,
+            )
             return 2
         evidence_text = args.evidence_file.read_text(encoding="utf-8-sig")
 

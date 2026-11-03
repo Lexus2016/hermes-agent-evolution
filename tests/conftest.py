@@ -440,6 +440,29 @@ def _hermetic_environment(tmp_path, tmp_path_factory, monkeypatch):
 # Backward-compat alias — old tests reference this fixture name. Keep it
 # as a no-op wrapper so imports don't break.
 @pytest.fixture(autouse=True)
+def _seed_pinned_evolution_surfaces(_hermetic_environment):
+    """Seed the pinned surfaces the evolution gates fail closed without (#3567).
+
+    ``_hermetic_environment`` points ``HERMES_HOME`` at a fresh temp dir, so the
+    host's real pinned copies are invisible. The evidence gates read their
+    thresholds from ``$HERMES_HOME/evolution/pinned`` and refuse to run when that
+    surface is missing — every test that imports a gate would error at collection
+    boundaries. Seeding the shipped in-tree copies here reproduces a deployed
+    host; tests of the pin itself override ``EVOLUTION_PINNED_EVIDENCE``.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [sys.executable, str(repo / "scripts" / "evolution_invariant_filter.py"),
+         "--install-seed"],
+        check=True, capture_output=True, cwd=repo,
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_hermes_home(_hermetic_environment):
     """Alias preserved for any test that yields this name explicitly."""
     return

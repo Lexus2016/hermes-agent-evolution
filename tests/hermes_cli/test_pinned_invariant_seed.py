@@ -31,7 +31,10 @@ def test_seed_pinned_invariant_surface_invokes_installer(tmp_path, monkeypatch, 
 
     def fake_seed():
         seeded["called"] = True
-        return [tmp_path / "evolution" / "pinned" / "evolution_invariant_rules.json"]
+        return [
+            tmp_path / "evolution" / "pinned" / "evolution_invariant_rules.json",
+            tmp_path / "evolution" / "pinned" / "evolution_evidence_thresholds.json",
+        ]
 
     _stub_seed(fake_seed, monkeypatch)
 

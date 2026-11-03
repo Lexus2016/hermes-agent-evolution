@@ -12,18 +12,23 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-_MAX_SPAN = 200
-_URL_RE = re.compile(r"https?://[^\s\])]+")
-_HDR_RE = re.compile(r"^###\s+\[(FEATURE|IMPROVEMENT|FIX|BUG)\]\s+(.+)$", re.MULTILINE)
-_QUOTE_RE = re.compile(
-    r'(?:^>\s+(.+)$)|(?:"([^"]{10,200})")|(?:\u201c([^\u201d]{10,200})\u201d)',
-    re.MULTILINE,
-)
+from evolution_evidence_config import span_patterns
+
+# Limits + patterns come from the PINNED evidence-gate surface (#3567). Resolved
+# lazily: importing this module never requires the surface, and a missing or
+# shadowed surface fails closed at the moment a gate function actually runs.
+_SPAN: dict | None = None
+
+
+def _span() -> dict:
+    global _SPAN
+    if _SPAN is None:
+        _SPAN = span_patterns()
+    return _SPAN
 
 
 def _evolution_dir() -> Path:
@@ -34,31 +39,33 @@ def _evolution_dir() -> Path:
     return Path(home) / "evolution"
 
 
-def parse_findings(md: str) -> List[Dict[str, Any]]:
+def parse_findings(md: str) -> list[dict[str, Any]]:
     """Extract findings from research report markdown."""
-    hdrs = list(_HDR_RE.finditer(md))
-    out: List[Dict[str, Any]] = []
+    hdrs = list(_span()["header"].finditer(md))
+    out: list[dict[str, Any]] = []
     for i, h in enumerate(hdrs):
         body = md[
             h.end() : hdrs[i + 1].start() if i + 1 < len(hdrs) else len(md)
         ].strip()
-        qm = _QUOTE_RE.search(body)
+        qm = _span()["quote"].search(body)
         qt = next((g for g in qm.groups() if g), None) if qm else None
-        out.append({
-            "title": h.group(2).strip(),
-            "type": h.group(1),
-            "body": body,
-            "source_urls": _URL_RE.findall(body),
-            "has_quote": bool(qt),
-            "quote_text": qt,
-            "quote_too_long": len(qt) > _MAX_SPAN if qt else False,
-        })
+        out.append(
+            {
+                "title": h.group(2).strip(),
+                "type": h.group(1),
+                "body": body,
+                "source_urls": _span()["url"].findall(body),
+                "has_quote": bool(qt),
+                "quote_text": qt,
+                "quote_too_long": len(qt) > _span()["max_span"] if qt else False,
+            }
+        )
     return out
 
 
-def evaluate_findings(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+def evaluate_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
     """Evaluate findings against evidence-span requirements."""
-    detail: List[Dict[str, Any]] = []
+    detail: list[dict[str, Any]] = []
     wq = wu = nl = 0
     for f in findings:
         has_q, has_u, is_long = (
@@ -70,16 +77,18 @@ def evaluate_findings(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         wu += has_u
         nl += is_long
         qt = f["quote_text"]
-        detail.append({
-            "title": f["title"],
-            "type": f["type"],
-            "has_quote": has_q,
-            "has_url": has_u,
-            "quote_too_long": is_long,
-            "source_urls": f["source_urls"],
-            "verifiable": has_q and has_u and not is_long,
-            "quote_preview": (qt[:80] + "...") if qt and len(qt) > 80 else qt,
-        })
+        detail.append(
+            {
+                "title": f["title"],
+                "type": f["type"],
+                "has_quote": has_q,
+                "has_url": has_u,
+                "quote_too_long": is_long,
+                "source_urls": f["source_urls"],
+                "verifiable": has_q and has_u and not is_long,
+                "quote_preview": (qt[:80] + "...") if qt and len(qt) > 80 else qt,
+            }
+        )
     total = len(findings)
     both = sum(1 for d in detail if d["has_quote"] and d["has_url"])
     return {
@@ -94,7 +103,7 @@ def evaluate_findings(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def run_gate(evolution_dir: Path | None = None) -> Dict[str, Any]:
+def run_gate(evolution_dir: Path | None = None) -> dict[str, Any]:
     """Run the evidence-span gate on the latest research report."""
     if evolution_dir is None:
         evolution_dir = _evolution_dir()
@@ -115,7 +124,7 @@ def run_gate(evolution_dir: Path | None = None) -> Dict[str, Any]:
     return result
 
 
-def format_summary(result: Dict[str, Any]) -> str:
+def format_summary(result: dict[str, Any]) -> str:
     """One-line summary for the pipeline log."""
     if result.get("skipped"):
         return f"[evidence-span-gate] skipped: {result['skipped']}"
@@ -128,7 +137,7 @@ def format_summary(result: Dict[str, Any]) -> str:
     )
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir: Path | None = None
     args = argv[1:]
     if "--evolution-dir" in args:

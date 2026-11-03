@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from evolution_invariant_filter import (
     install_pinned_rules,
     install_pinned_seed,
-    pinned_rules_path,  # noqa: E402
+    pinned_rules_path,
     _rules_path,
     check_proposal,
     classify_stakes,
@@ -25,8 +25,8 @@ from evolution_invariant_filter import (
     load_safe_fallbacks,
     resolve_pinned_fallback,
 )
-from evolution_harness_gate import run_cron_pass, run_gate  # noqa: E402
-from evolution_harness_sandbox import INVALID, VALIDATED, GateResult  # noqa: E402
+from evolution_harness_gate import run_cron_pass, run_gate
+from evolution_harness_sandbox import INVALID, VALIDATED, GateResult
 
 SURFACE = {
     "retry_count": 10,
@@ -406,7 +406,9 @@ def test_install_pinned_rules_seeds_a_missing_surface(tmp_path, monkeypatch):
     assert rules["rules_source"] == str(target)
 
 
-def test_install_pinned_rules_is_idempotent_and_refuses_divergence(tmp_path, monkeypatch):
+def test_install_pinned_rules_is_idempotent_and_refuses_divergence(
+    tmp_path, monkeypatch
+):
     target = tmp_path / "pinned" / "evolution_invariant_rules.json"
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
     install_pinned_rules()
@@ -426,7 +428,9 @@ def test_pinned_path_follows_hermes_home_and_ignores_the_profile(tmp_path, monke
     """Host-level resolution: ``$HERMES_HOME``, never a per-profile root."""
     monkeypatch.delenv("EVOLUTION_PINNED_RULES", raising=False)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    expected = tmp_path / "home" / "evolution" / "pinned" / "evolution_invariant_rules.json"
+    expected = (
+        tmp_path / "home" / "evolution" / "pinned" / "evolution_invariant_rules.json"
+    )
     assert pinned_rules_path() == expected
 
     monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path / "profile"))
@@ -434,18 +438,23 @@ def test_pinned_path_follows_hermes_home_and_ignores_the_profile(tmp_path, monke
 
 
 def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch):
-    """The deploy entry point seeds the whole pinned surface, not one file.
+    """The deploy entry point seeds every pinned data surface, not one file.
 
-    The invariant rulebook is the only pinned data file today. The evidence
-    gate, the security rules and the stage contracts are code, not data, so
-    they cannot be seeded — the seed must report exactly the surfaces it wrote.
+    The invariant rulebook and the evidence-gate thresholds (#3567) are pinned
+    data. The security rules and the stage contracts are still code, not data,
+    so the seed must report exactly the two surfaces it wrote.
     """
-    target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
-    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    rules = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
+    thresholds = tmp_path / "deploy" / "pinned" / "evolution_evidence_thresholds.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(rules))
+    monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE", str(thresholds))
 
     written = install_pinned_seed()
 
-    assert written == [target]
-    assert target.read_bytes() == _rules_path().read_bytes()
+    assert written == [rules, thresholds]
+    assert rules.read_bytes() == _rules_path().read_bytes()
+    from evolution_evidence_config import seed_path
+
+    assert thresholds.read_bytes() == seed_path().read_bytes()
     install_pinned_seed()  # second deploy: identical bytes, no force, no error
-    assert target.read_bytes() == written[0].read_bytes()
+    assert rules.read_bytes() == written[0].read_bytes()
