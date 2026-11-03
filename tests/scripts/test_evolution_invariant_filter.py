@@ -434,18 +434,21 @@ def test_pinned_path_follows_hermes_home_and_ignores_the_profile(tmp_path, monke
 
 
 def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch):
-    """The deploy entry point seeds the whole pinned surface, not one file.
+    """The deploy entry point seeds every pinned data file, not one file.
 
-    The invariant rulebook is the only pinned data file today. The evidence
-    gate, the security rules and the stage contracts are code, not data, so
-    they cannot be seeded — the seed must report exactly the surfaces it wrote.
+    Since #3567 that is the invariant rulebook plus the evidence-gate thresholds
+    and markers; the security policy and the stage contracts are still code, not
+    data, so they cannot be seeded. The seed reports exactly the surfaces it
+    wrote.
     """
     target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
+    evidence = tmp_path / "deploy" / "pinned" / "evolution_evidence_gate_rules.json"
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
+    monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(evidence))
 
     written = install_pinned_seed()
 
-    assert written == [target]
+    assert written == [target, evidence]
     assert target.read_bytes() == _rules_path().read_bytes()
     install_pinned_seed()  # second deploy: identical bytes, no force, no error
-    assert target.read_bytes() == written[0].read_bytes()
+    assert written[0].read_bytes() == target.read_bytes()

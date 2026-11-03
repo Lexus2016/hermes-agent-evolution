@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "span_gate": {
+    "max_quote_chars": 200,
+    "min_quote_chars": 10,
+    "verdict_types": ["FEATURE", "IMPROVEMENT", "FIX", "BUG"],
+    "url_markers": "https?://[^\\s\\])]+",
+    "quote_markers": "(?:^>\\s+(.+)$)|(?:\"([^\"]{MINQ,MAXQ})\")|(?:\\u201c([^\\u201d]{MINQ,MAXQ})\\u201d)",
+    "finding_header": "^###\\s+\\[({types})\\]\\s+(.+)$"
+  }
+}
