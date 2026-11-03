@@ -15,15 +15,28 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-_MAX_SPAN = 200
-_URL_RE = re.compile(r"https?://[^\s\])]+")
-_HDR_RE = re.compile(r"^###\s+\[(FEATURE|IMPROVEMENT|FIX|BUG)\]\s+(.+)$", re.MULTILINE)
-_QUOTE_RE = re.compile(
-    r'(?:^>\s+(.+)$)|(?:"([^"]{10,200})")|(?:\u201c([^\u201d]{10,200})\u201d)',
-    re.MULTILINE,
-)
+from evolution_evidence_gate_rules import load_rules
+
+
+def _rules() -> Dict[str, Any]:
+    return load_rules()["span_gate"]
+
+
+def _patterns() -> Tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+    """Compile the pinned markers; the pinned thresholds bound the quote span."""
+    rules = _rules()
+    lo, hi = int(rules["min_quote_chars"]), int(rules["max_quote_chars"])
+    if lo > hi:
+        raise ValueError(f"pinned span bounds are inverted: {lo} > {hi}")
+    quote = rules["quote_markers"].replace("{MINQ,MAXQ}", f"{{{lo},{hi}}}")
+    header = rules["finding_header"].replace("{types}", "|".join(rules["verdict_types"]))
+    return (
+        re.compile(rules["url_markers"]),
+        re.compile(header, re.MULTILINE),
+        re.compile(quote, re.MULTILINE),
+    )
 
 
 def _evolution_dir() -> Path:
@@ -36,22 +49,23 @@ def _evolution_dir() -> Path:
 
 def parse_findings(md: str) -> List[Dict[str, Any]]:
     """Extract findings from research report markdown."""
-    hdrs = list(_HDR_RE.finditer(md))
+    url_re, hdr_re, quote_re = _patterns()
+    hdrs = list(hdr_re.finditer(md))
     out: List[Dict[str, Any]] = []
     for i, h in enumerate(hdrs):
         body = md[
             h.end() : hdrs[i + 1].start() if i + 1 < len(hdrs) else len(md)
         ].strip()
-        qm = _QUOTE_RE.search(body)
+        qm = quote_re.search(body)
         qt = next((g for g in qm.groups() if g), None) if qm else None
         out.append({
             "title": h.group(2).strip(),
             "type": h.group(1),
             "body": body,
-            "source_urls": _URL_RE.findall(body),
+            "source_urls": url_re.findall(body),
             "has_quote": bool(qt),
             "quote_text": qt,
-            "quote_too_long": len(qt) > _MAX_SPAN if qt else False,
+            "quote_too_long": len(qt) > int(_rules()["max_quote_chars"]) if qt else False,
         })
     return out
 

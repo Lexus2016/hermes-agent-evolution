@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 from evolution_evidence_span_gate import (  # noqa: E402
     evaluate_findings,
@@ -11,6 +13,18 @@ from evolution_evidence_span_gate import (  # noqa: E402
     parse_findings,
     run_gate,
 )
+
+_SEED = Path(__file__).resolve().parent.parent.parent / "scripts" / "evolution_evidence_gate_rules.json"
+
+
+@pytest.fixture(autouse=True)
+def pinned_evidence_rules(tmp_path, monkeypatch):
+    """Simulate a deployed host: the gate reads a seeded pinned surface (#3567)."""
+    target = tmp_path / "pinned" / _SEED.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_SEED.read_bytes())
+    monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(target))
+
 
 _F = {
     "title": "T",

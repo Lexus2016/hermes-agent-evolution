@@ -103,12 +103,13 @@ def pinned_rules_path() -> Path:
 def install_pinned_seed(*, force: bool = False) -> list[Path]:
     """Seed every pinned surface a deploy owes the host.
 
-    Today that is the invariant rulebook. The evidence gate, the security rules
-    and the evolution stage contracts have no versioned data file of their own
-    yet — their logic is code — so they are NOT pinned here; a comment in the
-    merge brief tracks them as the next increment. Returns the paths written.
+    The invariant rulebook (#3560/#3563) and, since #3567, the evidence-gate
+    thresholds and markers. The security policy and the stage contracts are the
+    remaining slices of #3518 and are not pinned yet. Returns the paths written.
     """
-    return [install_pinned_rules(force=force)]
+    from evolution_evidence_gate_rules import install_pinned_rules as _install_evidence
+
+    return [install_pinned_rules(force=force), _install_evidence(force=force)]
 
 
 def install_pinned_rules(
