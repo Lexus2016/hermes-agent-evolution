@@ -45,6 +45,7 @@ for _p in (str(ROOT / "scripts"), str(ROOT)):
         sys.path.insert(0, _p)
 
 from agent.tool_call_capture import replay_trajectory
+from evolution_evidence_gate_rules import load_rules
 from evolution_skill_contracts import check_repository_edits
 from evolution_trajectory_logger import iter_trajectories
 
@@ -57,15 +58,12 @@ EXIT_NOT_REPLAYABLE = 3
 # replay it before the squash lands. Repo-relative, next to the change.
 RECORD_PATH = ".evolution/replay-record.json"
 
-# replay_trajectory outcome \u2192 per-turn verdict. "pass"/"fail" are the only
-# verdicts a recorded grade can be compared against.
-VERDICTS: dict[str, str] = {
-    "success": "pass",
-    "failed": "fail",
-    "incomplete": "incomplete",
-    "empty": "empty",
-}
-CERTIFIABLE = ("pass", "fail")
+
+# The verdict vocabulary and the certifiable grades come from the PINNED
+# evidence-gate surface (#3567), not from this agent-writable file. Resolved
+# lazily so importing the module never requires the surface to exist.
+def _replay_rules() -> dict[str, Any]:
+    return load_rules()["replay_gate"]
 
 
 class NotReplayable(ValueError):
@@ -74,7 +72,7 @@ class NotReplayable(ValueError):
 
 def _verdict(outcome: Any) -> str:
     """Map a replay outcome to its verdict; unknown outcomes are not guesses."""
-    verdict = VERDICTS.get(str(outcome))
+    verdict = _replay_rules()["verdicts"].get(str(outcome))
     if verdict is None:
         raise NotReplayable(f"unknown replay outcome: {outcome!r}")
     return verdict
@@ -113,11 +111,12 @@ def check_record(record: dict[str, Any]) -> str | None:
     reported as one.
     """
     expected = record.get("grade")
-    if expected not in CERTIFIABLE:
+    certifiable = _replay_rules()["certifiable"]
+    if expected not in certifiable:
         raise ValueError("record.grade must be 'pass' or 'fail'")
     for turn, verdict in enumerate(replay_grade(record), start=1):
         where = f"turn {turn} " if record.get("kind") == "trace" else ""
-        if verdict not in CERTIFIABLE:
+        if verdict not in certifiable:
             raise NotReplayable(
                 f"{where}replay outcome {verdict}: the record claims {expected} "
                 f"but an {verdict} turn cannot certify it"

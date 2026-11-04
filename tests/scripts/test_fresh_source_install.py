@@ -158,6 +158,11 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
     pinned = home / ".hermes" / "evolution" / "pinned" / "evolution_invariant_rules.json"
     assert pinned.is_file(), sorted(p.name for p in (home / ".hermes").rglob("*") if p.is_file())
     assert pinned.read_bytes() == (source / "scripts" / "evolution_invariant_rules.json").read_bytes()
+    # The evidence gates fail closed without their pinned copy, so the same
+    # seeding step must publish it (#3567).
+    evidence = home / ".hermes" / "evolution" / "pinned" / "evolution_evidence_gate_rules.json"
+    assert evidence.is_file(), sorted(p.name for p in (home / ".hermes").rglob("*") if p.is_file())
+    assert evidence.read_bytes() == (source / "scripts" / "evolution_evidence_gate_rules.json").read_bytes()
     assert json.loads(run([str(launcher), "from setup"]).stdout)["argv"] == ["from setup"]
     # Warm path publication must work with all acquisition inputs unavailable.
     shutil.rmtree(docroot)

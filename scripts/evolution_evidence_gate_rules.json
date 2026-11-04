@@ -7,5 +7,32 @@
     "url_markers": "https?://[^\\s\\])]+",
     "quote_markers": "(?:^>\\s+(.+)$)|(?:\"([^\"]{MINQ,MAXQ})\")|(?:\\u201c([^\\u201d]{MINQ,MAXQ})\\u201d)",
     "finding_header": "^###\\s+\\[({types})\\]\\s+(.+)$"
+  },
+  "type_gate": {
+    "diff_markers": "(?:^diff --git\\s+|^---\\s+[ab]/|^\\+\\+\\+\\s+[ab]/|^@@\\s+-\\d+,\\d+\\s+\\+\\d+,\\d+\\s+@@)",
+    "test_result_markers": "(?:=+ (?:(?:\\d+ passed)|\\d+ failed|\\d+ skipped|\\d+ error) in \\d+\\.\\d+s =+|collected \\d+ items|=== Summary: \\d+ files?, \\d+ tests? passed|\\[\\s*\\d+%\\s*\\|\\s*\\d+/\\d+\\s*\\|\\s*\\u2713\\d+\\s*\\]|\\d+ passed(?:, \\d+ skipped)? in \\d+\\.\\d+s|test session starts)",
+    "command_output_markers": "(?:Command (?:exited with code \\d+|completed with exit code \\d+)|Exit code:\\s*\\d+|(?:^total \\d+\\n[d-][rwx-]{9})|(?:^\\$ [^\\n]+\\n))",
+    "expected_evidence": {
+      "code_change": ["diff", "file_reference"],
+      "command_run": ["command_output", "test_result"],
+      "test_pass": ["test_result"],
+      "bug_fix": ["test_result", "diff"],
+      "issue_closure": ["test_result", "diff", "file_reference"]
+    },
+    "closure_overrides": {
+      "already-exists": ["file_reference"],
+      "already_implemented": ["file_reference"],
+      "completed": ["test_result", "diff"],
+      "fixed": ["test_result", "diff"]
+    }
+  },
+  "replay_gate": {
+    "verdicts": {
+      "success": "pass",
+      "failed": "fail",
+      "incomplete": "incomplete",
+      "empty": "empty"
+    },
+    "certifiable": ["pass", "fail"]
   }
 }
