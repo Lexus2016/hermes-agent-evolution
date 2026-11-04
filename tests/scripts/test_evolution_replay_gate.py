@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -24,6 +26,10 @@ from evolution_replay_gate import (
 )
 from evolution_trajectory_logger import TrajectoryLog
 
+pytestmark = pytest.mark.usefixtures("pinned_evidence_gate_rules")
+
+_SEED = Path(__file__).resolve().parents[2] / "scripts" / "evolution_evidence_gate_rules.json"
+
 BASE = (
     "---\nname: example\ndescription: Example routing\ncontract:\n  version: 1\n"
     "  intent: Research\n  behavioral_criteria: [routing-applicability]\n"
@@ -31,6 +37,19 @@ BASE = (
     "  protected_constraints: [Keep sources.]\n  replay_cases:\n"
     "    - {id: positive, task: research, applicable: true}\n---\nKeep sources.\n"
 )
+
+
+def test_pinned_certifiable_grades_drive_the_gate(tmp_path, monkeypatch):
+    """The certifiable grades are read from the pinned copy, not hard-coded."""
+    data = json.loads(_SEED.read_bytes())
+    data["replay_gate"]["certifiable"] = ["pass"]
+    target = tmp_path / "loosened" / _SEED.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(target))
+
+    with pytest.raises(ValueError, match="record.grade"):
+        check_record({"kind": "skill", "grade": "fail"})
 
 
 def _git(cwd, *args):

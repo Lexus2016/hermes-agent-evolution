@@ -74,7 +74,7 @@ def load_rules(path: Optional[Path] = None) -> dict[str, Any]:
     """Pinned thresholds/markers; fail closed when the surface is unusable."""
     p = Path(path) if path is not None else _resolve()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"cannot read evidence-gate rules {p}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("version"), int) or data["version"] < 1:

@@ -28,30 +28,24 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-DIFF_MARKERS = re.compile(
-    r"(?:^diff --git\s+|^---\s+[ab]/|^\+\+\+\s+[ab]/|^@@\s+-\d+,\d+\s+\+\d+,\d+\s+@@)",
-    re.MULTILINE,
-)
+from evolution_evidence_gate_rules import load_rules
 
-TEST_RESULT_MARKERS = re.compile(
-    r"(?:=+ (?:(?:\d+ passed)|\d+ failed|\d+ skipped|\d+ error) in \d+\.\d+s =+|"
-    r"collected \d+ items|"
-    r"=== Summary: \d+ files?, \d+ tests? passed|"
-    r"\[\s*\d+%\s*\|\s*\d+/\d+\s*\|\s*✓\d+\s*\]|"
-    r"\d+ passed(?:, \d+ skipped)? in \d+\.\d+s|"
-    r"test session starts)",
-    re.MULTILINE,
-)
 
-COMMAND_OUTPUT_MARKERS = re.compile(
-    r"(?:Command (?:exited with code \d+|completed with exit code \d+)|"
-    r"Exit code:\s*\d+|"
-    r"(?:^total \d+\n[d-][rwx-]{9})|"
-    r"(?:^\$ [^\n]+\n))",
-    re.MULTILINE,
-)
+def _rules() -> dict[str, Any]:
+    """Pinned evidence-gate markers and claim map (#3567)."""
+    return load_rules()["type_gate"]
+
+
+def _markers() -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+    """Compile the pinned markers; none of them stay hard-coded here."""
+    rules = _rules()
+    return (
+        re.compile(rules["diff_markers"], re.MULTILINE),
+        re.compile(rules["test_result_markers"], re.MULTILINE),
+        re.compile(rules["command_output_markers"], re.MULTILINE),
+    )
 
 
 def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str:
@@ -60,17 +54,18 @@ def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str
         return "empty"
 
     text = evidence.strip()
+    markers = _markers()
 
     # Test runner output takes precedence if present
-    if TEST_RESULT_MARKERS.search(text):
+    if markers[1].search(text):
         return "test_result"
 
     # Unified diff format
-    if DIFF_MARKERS.search(text):
+    if markers[0].search(text):
         return "diff"
 
     # Command execution output trace
-    if COMMAND_OUTPUT_MARKERS.search(text):
+    if markers[2].search(text):
         return "command_output"
 
     # File reference check on disk
@@ -86,13 +81,14 @@ def detect_evidence_type(evidence: str, repo_root: Optional[Path] = None) -> str
     return "description_only"
 
 
-EXPECTED_EVIDENCE_MAP: Dict[str, Set[str]] = {
-    "code_change": {"diff", "file_reference"},
-    "command_run": {"command_output", "test_result"},
-    "test_pass": {"test_result"},
-    "bug_fix": {"test_result", "diff"},
-    "issue_closure": {"test_result", "diff", "file_reference"},
-}
+def _expected_map() -> dict[str, set[str]]:
+    """Claim type -> acceptable evidence types, from the pinned surface."""
+    return {k: set(v) for k, v in _rules()["expected_evidence"].items()}
+
+
+def _closure_overrides() -> dict[str, set[str]]:
+    """Closure reason -> narrowed evidence types, from the pinned surface."""
+    return {k: set(v) for k, v in _rules()["closure_overrides"].items()}
 
 
 def evaluate_claim(
@@ -107,7 +103,8 @@ def evaluate_claim(
     Returns a dict with 'valid': bool, 'error': str | None, and diagnostic fields.
     """
     claim_norm = claim_type.strip().lower()
-    if claim_norm not in EXPECTED_EVIDENCE_MAP:
+    expected = _expected_map()
+    if claim_norm not in expected:
         return {
             "valid": False,
             "error": "unknown_claim_type",
@@ -116,15 +113,14 @@ def evaluate_claim(
         }
 
     detected_type = detect_evidence_type(evidence, repo_root=repo_root)
-    allowed_types = set(EXPECTED_EVIDENCE_MAP[claim_norm])
+    allowed_types = set(expected[claim_norm])
 
     # Special handling for issue closures
     if claim_norm == "issue_closure" and closure_reason:
         reason_norm = closure_reason.strip().lower()
-        if reason_norm in ("already-exists", "already_implemented"):
-            allowed_types = {"file_reference"}
-        elif reason_norm in ("completed", "fixed"):
-            allowed_types = {"test_result", "diff"}
+        overrides = _closure_overrides()
+        if reason_norm in overrides:
+            allowed_types = set(overrides[reason_norm])
 
     if detected_type not in allowed_types:
         return {
@@ -186,7 +182,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--claim-type",
-        choices=["code_change", "command_run", "test_pass", "bug_fix", "issue_closure"],
+        choices=sorted(_expected_map()),
         help="Type of claim being verified",
     )
     parser.add_argument("--statement", default="", help="Claim statement text")

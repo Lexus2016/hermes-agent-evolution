@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_merge_gate import (  # noqa: E402
@@ -15,6 +17,8 @@ from evolution_merge_gate import (  # noqa: E402
     check_merge_policy_with_quality,
     _pr_snapshot,
 )
+
+pytestmark = pytest.mark.usefixtures("pinned_evidence_gate_rules")
 
 
 def _f(path, additions=1, deletions=0, patch=None):

@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
 from evolution_evidence_type_gate import (  # noqa: E402
@@ -11,6 +13,10 @@ from evolution_evidence_type_gate import (  # noqa: E402
     detect_evidence_type,
     evaluate_claim,
 )
+
+pytestmark = pytest.mark.usefixtures("pinned_evidence_gate_rules")
+
+_SEED = Path(__file__).resolve().parent.parent.parent / "scripts" / "evolution_evidence_gate_rules.json"
 
 SAMPLE_DIFF = """diff --git a/test.py b/test.py
 --- a/test.py
@@ -28,6 +34,20 @@ SAMPLE_COMMAND_OUTPUT = """$ python3 --version
 Python 3.11.0
 Command exited with code 0.
 """
+
+
+def test_pinned_claim_map_drives_the_judgement(tmp_path, monkeypatch):
+    """The claim-to-evidence map is read from the pinned copy, not the checkout."""
+    data = json.loads(_SEED.read_bytes())
+    data["type_gate"]["expected_evidence"]["code_change"] = ["file_reference"]
+    target = tmp_path / "loosened" / _SEED.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(target))
+
+    result = evaluate_claim("code_change", SAMPLE_DIFF)
+    assert result["valid"] is False
+    assert result["received_type"] == "diff"
 
 
 def test_detect_evidence_types(tmp_path):
