@@ -1,12 +1,20 @@
 # Hermes Evolution 🧬
 
-> A self-improving version of **Hermes Agent** — it researches improvements,
-> proposes them, and updates itself daily. You keep using Hermes as usual; it
-> gets better on its own.
+**A Hermes Agent fork with scheduled research, improvement proposals and an owner-operated development pipeline.**
+
+This repository adds evolution workflows to [Hermes Agent](https://github.com/nousresearch/hermes-agent)
+by Nous Research. It is maintained separately in the Lexus2016 fork. Available
+actions depend on configuration and GitHub permissions; installing it does not
+guarantee that every workflow succeeds or that each update improves your workload.
+
+[Install and upgrade](#-install-or-upgrade) · [Evolution workflow](EVOLUTION_README.md) · [Contribute](CONTRIBUTING_EVOLUTION.md) · [Report a bug](https://github.com/Lexus2016/hermes-agent-evolution/issues/new/choose)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Based on Hermes Agent](https://img.shields.io/badge/based%20on-Hermes%20Agent-blue.svg)](https://github.com/nousresearch/hermes-agent)
-**The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
+**Based on the agent built by [Nous Research](https://nousresearch.com).** Hermes provides
+memory, skills, session search, a terminal interface and messaging integrations.
+This fork adds the evolution workflow described below. Hosting requirements and
+provider costs depend on the configuration you choose.
 
 Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
 
@@ -22,28 +30,32 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ---
 
-## ⭐ Install or upgrade — one command
+## ⭐ Install or upgrade
 
-Whether you're **starting from scratch** or **already running Hermes**, paste
-**one line** into your terminal. If Hermes isn't installed yet, it installs our
-version fresh; if it is, it switches your existing Hermes onto Evolution
-(your chats, memory, and settings are kept):
+Review [AUTO_UPGRADE.md](AUTO_UPGRADE.md) and [upgrade.sh](upgrade.sh) before running
+the installer. It can install the fork or switch an existing Hermes checkout to it,
+refresh evolution skills, register scheduled evolution jobs and restart a running
+gateway after a code update. Those jobs may make model calls or GitHub changes
+according to the credentials and mode you configure.
+
+The default script also attempts to schedule daily code updates and star this
+repository using available GitHub authentication. To skip those two optional
+actions, use both flags:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
+git clone https://github.com/Lexus2016/hermes-agent-evolution.git
+cd hermes-agent-evolution
+# Inspect upgrade.sh and the linked installation guide first.
+bash upgrade.sh --no-auto-update --no-star
 ```
 
-That's it. The script does everything for you, safely:
-- backs up your data (nothing is lost),
-- switches your Hermes to this version,
-- turns on the evolution features,
-- sets up **daily auto-updates** so it keeps improving on its own.
+`--no-auto-update` skips creation of the separate daily updater; it does **not**
+disable evolution jobs or remove an updater that was already installed. `--no-star`
+skips the star attempt on this run. There is no read-only preview in this command.
 
-You can re-run it any time — it won't break anything. Your existing chats,
-memory, and settings stay exactly as they were.
-
-> Don't want unattended daily updates? Add `--no-star` and/or `--no-auto-update`
-> when you run it (from a clone): `bash upgrade.sh --no-auto-update`.
+Back up your data independently before upgrading. The script attempts a data
+backup, but continues if it fails and retains only the three newest matching
+backups. Review its output and verify the installation before relying on it.
 
 ### Windows & Termux
 
@@ -101,36 +113,14 @@ In both cases your config, chats and memory live on the `$HERMES_HOME` volume
 
 #### Windows Defender or antivirus flags `uv.exe` as malware
 
-If your antivirus (Bitdefender, Windows Defender, etc.) quarantines `uv.exe` from the Hermes `bin` folder (`%LOCALAPPDATA%\hermes\bin\uv.exe`), this is a **false positive**. The file is Astral's `uv` — the Rust Python package manager Hermes bundles to manage its Python environment. ML-based antivirus engines commonly flag unsigned Rust binaries that download and install packages.
+Do not assume an alert is a false positive or disable protection for the Hermes
+folder. Keep the file quarantined while you check its origin and the exact vendor
+release. The package manager used by Hermes is [Astral uv](https://github.com/astral-sh/uv),
+but a filename alone does not establish that a particular executable is authentic.
 
-**To verify your copy is authentic:**
-
-```powershell
-# Install GitHub CLI if needed
-winget install --id GitHub.cli
-
-# Login to GitHub
-gh auth login
-
-# Run verification
-$uv = "$env:LOCALAPPDATA\hermes\bin\uv.exe"
-$ver = (& $uv --version).Split(' ')[1]
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$zip = "$env:TEMP\uv.zip"
-Invoke-WebRequest "https://github.com/astral-sh/uv/releases/download/$ver/uv-x86_64-pc-windows-msvc.zip" -OutFile $zip -UseBasicParsing
-gh attestation verify $zip --repo astral-sh/uv
-Expand-Archive $zip "$env:TEMP\uv_x" -Force
-(Get-FileHash "$env:TEMP\uv_x\uv.exe").Hash -eq (Get-FileHash $uv).Hash
-```
-
-If attestation says "Verification succeeded" and the last line prints `True`, you're good.
-
-**To whitelist Hermes:**
-- **Windows Defender:** Run PowerShell as Admin → `Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\hermes\bin"`
-- **Bitdefender:** Add an exception in the Bitdefender console (Protection > Antivirus > Settings > Manage Exceptions)
-- Whitelist the **folder**, not the file hash — Hermes updates `uv` and the hash changes every version
-
-For more context, see the upstream Astral reports: [astral-sh/uv#13553](https://github.com/astral-sh/uv/issues/13553), [astral-sh/uv#15011](https://github.com/astral-sh/uv/issues/15011), [astral-sh/uv#10079](https://github.com/astral-sh/uv/issues/10079).
+Use the official release's verification instructions and your antivirus vendor's
+review process. If you report an installation problem, include the installer
+version and detection name, without credentials or private files.
 
 ---
 
@@ -198,7 +188,8 @@ open pull requests, push branches, and cut releases. You own the repo, so use a
 
 ## 🧬 What you get
 
-- **Daily research** — scans other AI agents, papers, and trends for ideas.
+- **Scheduled research** — looks for improvement ideas; current schedules are
+  documented in [EVOLUTION_README.md](EVOLUTION_README.md#-daily-cycle).
 - **Introspection** — reviews its own past sessions with you to find what
   blocked real tasks, and proposes fixes for *those* (not just shiny features).
 - **Proposals** — opens GitHub issues with concrete improvement suggestions.
@@ -225,10 +216,13 @@ included; see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
 
 ## 🛡️ Is it safe?
 
-Yes. The agent can **propose** changes but cannot silently rewrite itself:
-every change goes through a pull request with automated tests, and important
-parts require your approval before they're merged. Updates are backed up and
-roll back automatically if anything looks wrong.
+Evolution can run code, use paid models, publish GitHub changes and update the
+installed application. The available actions depend on token permissions, mode,
+scheduled jobs and repository controls. The workflow includes tests and gates,
+but these are not a guarantee against failures, data loss or unsafe changes.
+
+Review the active configuration and credentials, maintain independent backups,
+and test updates before enabling unattended work on important data.
 
 Details: **[EVOLUTION_README.md](EVOLUTION_README.md)** ·
 **[SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md)**
@@ -265,7 +259,9 @@ for activation, daily use, dependency changes, and leaving the environment.
 
 - 💬 [Discord](https://discord.gg/NousResearch)
 - 📚 [Skills Hub](https://agentskills.io)
-- 🐛 [Issues](https://github.com/NousResearch/hermes-agent/issues)
+- 🐛 [Issues for this fork](https://github.com/Lexus2016/hermes-agent-evolution/issues/new/choose)
+- 🛠 [Contributing to this fork](CONTRIBUTING_EVOLUTION.md)
+- 🔒 [Security scope and reporting](SECURITY.md)
 - 🔌 [computer-use-linux](https://github.com/avifenesh/computer-use-linux) — Linux desktop-control MCP server for Hermes and other MCP hosts, with AT-SPI accessibility trees, Wayland/X11 input, screenshots, and compositor window targeting.
 - 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — Community WeChat bridge: Run Hermes Agent and OpenClaw on the same WeChat account.
 
@@ -275,4 +271,5 @@ for activation, daily use, dependency changes, and leaving the environment.
 
 MIT — see [LICENSE](LICENSE).
 
-Built by [Nous Research](https://nousresearch.com).
+Based on Hermes Agent by [Nous Research](https://nousresearch.com).
+Evolution additions are maintained in this fork.
