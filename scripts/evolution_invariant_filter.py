@@ -103,18 +103,19 @@ def pinned_rules_path() -> Path:
 def install_pinned_seed(*, force: bool = False) -> list[Path]:
     """Seed every pinned surface a deploy owes the host.
 
-    The invariant rulebook (#3560/#3563) and, since #3567, the evidence-gate
-    thresholds and markers. The security policy and the stage contracts are the
-    remaining slices of #3518 and are not pinned yet. Returns the paths written.
+    Rulebook, evidence-gate thresholds (#3567) and security policy (#3568).
     """
     from evolution_evidence_gate_rules import install_pinned_rules as _install_evidence
+    from evolution_security_policy import install_pinned_rules as _install_policy
 
-    return [install_pinned_rules(force=force), _install_evidence(force=force)]
+    return [
+        install_pinned_rules(force=force),
+        _install_evidence(force=force),
+        _install_policy(force=force),
+    ]
 
 
-def install_pinned_rules(
-    source: Optional[Path] = None, *, force: bool = False
-) -> Path:
+def install_pinned_rules(source: Optional[Path] = None, *, force: bool = False) -> Path:
     """Copy the in-tree rules seed onto the pinned surface (deploy-time step).
 
     Idempotent: an existing pinned file with identical bytes is left untouched,
@@ -195,6 +196,17 @@ _DEFAULT_TEXT_FIELDS = (
 
 # Default path-bearing fields scanned by ``forbidden_paths``.
 _DEFAULT_PATH_FIELDS = ("path", "file", "target", "target_file", "files")
+
+_policy_cache = None  # pinned warn/block policy (#3568); fail-closed when shadowed
+
+
+def _policy_value(key):
+    global _policy_cache
+    if _policy_cache is None:
+        from evolution_security_policy import load_policy
+
+        _policy_cache = load_policy()
+    return _policy_cache[key]
 
 
 def _rules_path() -> Path:
@@ -281,10 +293,11 @@ def _stakes_rank(stakes: Any) -> int:
     Unknown values are coerced to the safe default (high). Returns an index
     into ``_STAKES_ORDER`` so callers can compare with ``>=``.
     """
+    order = _STAKES_ORDER
     label = str(stakes or "").strip().lower()
-    if label in _STAKES_ORDER:
-        return _STAKES_ORDER.index(label)
-    return _STAKES_ORDER.index(_DEFAULT_STAKES)
+    if label in order:
+        return order.index(label)
+    return order.index(_DEFAULT_STAKES)
 
 
 def classify_stakes(obj: Any) -> Tuple[str, str]:
@@ -308,14 +321,7 @@ def classify_stakes(obj: Any) -> Tuple[str, str]:
         paths = _walk_paths(obj, _DEFAULT_PATH_FIELDS)
         if not paths:
             return _DEFAULT_STAKES, "default"
-        high_fragments = (
-            "evolution_merge_gate",
-            "evolution_harness_gate",
-            "register_evolution_cron",
-            "evolution_orchestrator",
-            "tools/approval",
-            "evolution_*_gate.py",
-        )
+        high_fragments = _policy_value("high_stakes_path_fragments")
         for p in paths:
             pl = p.lower()
             if any(frag in pl for frag in high_fragments):
@@ -490,8 +496,14 @@ def check_proposal(
     # fail-safe default) and use each rule's ``enforce_at`` floor to decide
     # whether a finding BLOCKS or is merely advisory. Backwards compatible:
     # a rule with no ``enforce_at`` blocks every proposal, exactly as before.
-    stakes, stakes_source = classify_stakes(proposal)
-    stakes_rank = _stakes_rank(stakes)
+    try:
+        stakes, stakes_source = classify_stakes(proposal)
+        stakes_rank = _stakes_rank(stakes)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "violations": [{"rule": "policy-unavailable", "reason": str(exc)}],
+        }
 
     blocking: List[Dict[str, Any]] = []
     advisory: List[Dict[str, Any]] = []

@@ -44,6 +44,10 @@ def _deployed_pinned_invariant_surface(tmp_path, monkeypatch):
         pinned,
     )
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+    # The warn/block policy is pinned the same way (#3568).
+    policy = tmp_path / "pinned" / "evolution_security_policy.json"
+    shutil.copyfile(Path(__file__).resolve().parents[2] / "scripts" / policy.name, policy)
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
 
 SURFACE = {
     "retry_count": 10,

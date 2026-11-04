@@ -306,6 +306,10 @@ def _hermetic_pinned_surface(tmp_path, monkeypatch):
     pinned.parent.mkdir()
     shutil.copyfile(_rules_path(), pinned)
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+    policy = tmp_path / "pinned-policy" / "evolution_security_policy.json"
+    policy.parent.mkdir()
+    shutil.copyfile(_rules_path().with_name(policy.name), policy)
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
 
 
 def _pinned_rules(tmp_path, monkeypatch):
@@ -437,18 +441,52 @@ def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch
     """The deploy entry point seeds every pinned data file, not one file.
 
     Since #3567 that is the invariant rulebook plus the evidence-gate thresholds
-    and markers; the security policy and the stage contracts are still code, not
-    data, so they cannot be seeded. The seed reports exactly the surfaces it
-    wrote.
+    and markers, plus the warn/block policy since #3568.
     """
     target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
     evidence = tmp_path / "deploy" / "pinned" / "evolution_evidence_gate_rules.json"
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
     monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(evidence))
+    policy = tmp_path / "deploy" / "pinned" / "evolution_security_policy.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
 
     written = install_pinned_seed()
 
-    assert written == [target, evidence]
+    assert written == [target, evidence, policy]
     assert target.read_bytes() == _rules_path().read_bytes()
     install_pinned_seed()  # second deploy: identical bytes, no force, no error
     assert written[0].read_bytes() == target.read_bytes()
+
+
+def test_pinned_policy_beats_a_rewritten_in_tree_copy(tmp_path, monkeypatch):
+    """A loosened in-tree policy never reaches the filter (#3568)."""
+    import json as _json
+
+    import evolution_security_policy as mod
+
+    pinned = tmp_path / "pinned-policy" / "evolution_security_policy.json"
+    pinned.parent.mkdir(parents=True, exist_ok=True)
+    pinned.write_text(
+        _json.dumps(
+            {
+                "version": 1,
+                "stakes_order": ["low", "medium", "high"],
+                "default_stakes": "high",
+                "default_enforce_at": "low",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(pinned))
+    loaded = mod.load_policy()  # default load reads only the pinned surface
+    assert loaded["default_enforce_at"] == "low" and loaded["policy_source"] == str(
+        pinned
+    )
+    shadow = pinned.parent / "evolution_security_policy.override.json"
+    shadow.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="shadowed"):
+        mod.load_policy()
+    shadow.unlink()
+    pinned.unlink()
+    with pytest.raises(ValueError, match="missing"):
+        mod.load_policy()
