@@ -163,6 +163,10 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
     evidence = home / ".hermes" / "evolution" / "pinned" / "evolution_evidence_gate_rules.json"
     assert evidence.is_file(), sorted(p.name for p in (home / ".hermes").rglob("*") if p.is_file())
     assert evidence.read_bytes() == (source / "scripts" / "evolution_evidence_gate_rules.json").read_bytes()
+    # The warn/block policy the filter applies is pinned the same way (#3568).
+    policy = home / ".hermes" / "evolution" / "pinned" / "evolution_security_policy.json"
+    assert policy.is_file(), sorted(p.name for p in (home / ".hermes").rglob("*") if p.is_file())
+    assert policy.read_bytes() == (source / "scripts" / "evolution_security_policy.json").read_bytes()
     assert json.loads(run([str(launcher), "from setup"]).stdout)["argv"] == ["from setup"]
     # Warm path publication must work with all acquisition inputs unavailable.
     shutil.rmtree(docroot)

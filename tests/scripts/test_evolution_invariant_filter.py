@@ -306,6 +306,10 @@ def _hermetic_pinned_surface(tmp_path, monkeypatch):
     pinned.parent.mkdir()
     shutil.copyfile(_rules_path(), pinned)
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(pinned))
+    # The warn/block policy is pinned the same way since #3568.
+    policy = tmp_path / "pinned" / "evolution_security_policy.json"
+    shutil.copyfile(_rules_path().with_name(policy.name), policy)
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
 
 
 def _pinned_rules(tmp_path, monkeypatch):
@@ -437,18 +441,64 @@ def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch
     """The deploy entry point seeds every pinned data file, not one file.
 
     Since #3567 that is the invariant rulebook plus the evidence-gate thresholds
-    and markers; the security policy and the stage contracts are still code, not
-    data, so they cannot be seeded. The seed reports exactly the surfaces it
-    wrote.
+    and markers, and since #3568 the warn/block policy; the stage contracts are
+    still code, so they cannot be seeded. The seed reports exactly the surfaces
+    it wrote.
     """
     target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
     evidence = tmp_path / "deploy" / "pinned" / "evolution_evidence_gate_rules.json"
     monkeypatch.setenv("EVOLUTION_PINNED_RULES", str(target))
     monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(evidence))
+    policy = tmp_path / "deploy" / "pinned" / "evolution_security_policy.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
 
     written = install_pinned_seed()
 
-    assert written == [target, evidence]
+    assert written == [target, evidence, policy]
     assert target.read_bytes() == _rules_path().read_bytes()
     install_pinned_seed()  # second deploy: identical bytes, no force, no error
     assert written[0].read_bytes() == target.read_bytes()
+
+
+def test_pinned_policy_value_drives_enforcement(tmp_path, monkeypatch):
+    """A pinned policy value actually changes filter behavior (#3568).
+
+    The shipped policy floors ``enforce_at`` at ``low``, so a medium-stakes
+    proposal on a forbidden path blocks. Raising the floor to ``high`` in the
+    PINNED copy demotes the same finding to advisory — proof the policy is read
+    from the pinned surface, not from a constant in this module.
+    """
+    import json as _json
+
+    import evolution_security_policy as policy_mod
+
+    medium = {**CLEAN, "path": "scripts/token_store.py"}
+    assert check_proposal(medium)["ok"] is False
+
+    loosened = tmp_path / "policy" / "evolution_security_policy.json"
+    loosened.parent.mkdir()
+    data = _json.loads(policy_mod.seed_path().read_text(encoding="utf-8"))
+    data["default_enforce_at"] = "high"
+    loosened.write_text(_json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(loosened))
+
+    judged = check_proposal(medium)
+    assert judged["ok"] is True and judged["advisory"]
+
+
+def test_missing_or_shadowed_policy_fails_closed(tmp_path, monkeypatch):
+    """No pinned policy, or an in-tree shadow of it, is never a silent pass."""
+    import shutil
+
+    import evolution_security_policy as policy_mod
+
+    pinned = tmp_path / "policy" / "evolution_security_policy.json"
+    pinned.parent.mkdir()
+    monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(pinned))
+    assert check_proposal(CLEAN)["violations"][0]["rule"] == "policy-unavailable"
+
+    shutil.copyfile(policy_mod.seed_path(), pinned)
+    assert check_proposal(CLEAN)["ok"] is True
+    shadow = pinned.parent / "evolution_security_policy.override.json"
+    shadow.write_text("{}", encoding="utf-8")
+    assert check_proposal(CLEAN)["violations"][0]["rule"] == "policy-unavailable"

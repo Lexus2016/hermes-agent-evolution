@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "stakes_order": ["low", "medium", "high"],
+  "default_stakes": "high",
+  "default_enforce_at": "low",
+  "default_text_fields": ["delta", "text", "rationale", "title", "body", "content", "summary"],
+  "default_path_fields": ["path", "file", "target", "target_file", "files"],
+  "high_stakes_path_fragments": [
+    "evolution_merge_gate",
+    "evolution_harness_gate",
+    "register_evolution_cron",
+    "evolution_orchestrator",
+    "tools/approval",
+    "evolution_*_gate.py"
+  ]
+}
