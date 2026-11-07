@@ -441,9 +441,8 @@ def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch
     """The deploy entry point seeds every pinned data file, not one file.
 
     Since #3567 that is the invariant rulebook plus the evidence-gate thresholds
-    and markers, and since #3568 the warn/block policy; the stage contracts are
-    still code, so they cannot be seeded. The seed reports exactly the surfaces
-    it wrote.
+    and markers, since #3568 the warn/block policy and since #3569 the stage
+    contracts. The seed reports exactly the surfaces it wrote.
     """
     target = tmp_path / "deploy" / "pinned" / "evolution_invariant_rules.json"
     evidence = tmp_path / "deploy" / "pinned" / "evolution_evidence_gate_rules.json"
@@ -451,10 +450,12 @@ def test_install_pinned_seed_covers_every_deployed_surface(tmp_path, monkeypatch
     monkeypatch.setenv("EVOLUTION_PINNED_EVIDENCE_RULES", str(evidence))
     policy = tmp_path / "deploy" / "pinned" / "evolution_security_policy.json"
     monkeypatch.setenv("EVOLUTION_PINNED_SECURITY_POLICY", str(policy))
+    stage = tmp_path / "deploy" / "pinned" / "evolution_stage_contracts.json"
+    monkeypatch.setenv("EVOLUTION_PINNED_STAGE_CONTRACTS", str(stage))
 
     written = install_pinned_seed()
 
-    assert written == [target, evidence, policy]
+    assert written == [target, evidence, policy, stage]
     assert target.read_bytes() == _rules_path().read_bytes()
     install_pinned_seed()  # second deploy: identical bytes, no force, no error
     assert written[0].read_bytes() == target.read_bytes()

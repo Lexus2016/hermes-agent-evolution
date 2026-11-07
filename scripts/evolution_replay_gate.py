@@ -83,7 +83,7 @@ def replay_grade(record: dict[str, Any]) -> list[str]:
     kind = record.get("kind")
     if kind == "skill":
         root = Path(record.get("root") or ".")
-        errors = check_repository_edits(root, record.get("base") or "origin/main")
+        errors = check_repository_edits(root, record.get("base") or None)
         return ["fail" if errors else "pass"]
     if kind == "trace":
         # One grade per turn. Session traces are one JSON object per line

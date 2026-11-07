@@ -26,7 +26,9 @@ from evolution_replay_gate import (
 )
 from evolution_trajectory_logger import TrajectoryLog
 
-pytestmark = pytest.mark.usefixtures("pinned_evidence_gate_rules")
+pytestmark = pytest.mark.usefixtures(
+    "pinned_evidence_gate_rules", "pinned_stage_contracts"
+)
 
 _SEED = Path(__file__).resolve().parents[2] / "scripts" / "evolution_evidence_gate_rules.json"
 

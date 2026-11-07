@@ -17,8 +17,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-_REQUIRED = {"failure_evidence", "root_cause", "targeted_fix", "predicted_impact"}
-_SAFE_REVERT = {"skill", "memory", "prompt", "config"}
+
+def _stage() -> dict[str, Any]:
+    """The edit stage of the pinned contracts (#3569); fails closed."""
+    from evolution_stage_contracts import load_stage_contracts
+
+    return load_stage_contracts()["edit_contract"]
 
 
 def _path(d: Path | None = None) -> Path:
@@ -31,10 +35,17 @@ def _path(d: Path | None = None) -> Path:
 
 def validate_contract(c: Dict[str, Any]) -> List[str]:
     """Validate required fields; returns error list."""
-    errs = [f"missing required field: {f}" for f in _REQUIRED if not c.get(f)]
+    stage = _stage()
+    errs = [
+        f"missing required field: {f}"
+        for f in stage["required_fields"]
+        if not c.get(f)
+    ]
     pi = c.get("predicted_impact", {})
-    if isinstance(pi, dict) and not pi.get("should_flip") and not pi.get("cases"):
-        errs.append("predicted_impact must specify 'should_flip' or 'cases'")
+    keys = stage["predicted_impact_keys"]
+    required = "predicted_impact" in stage["required_fields"]
+    if required and isinstance(pi, dict) and not any(pi.get(k) for k in keys):
+        errs.append("predicted_impact must specify " + " or ".join(f"'{k}'" for k in keys))
     return errs
 
 
@@ -43,6 +54,7 @@ def record_contract(c: Dict[str, Any], d: Path | None = None) -> Dict[str, Any]:
     errs = validate_contract(c)
     if errs:
         raise ValueError("; ".join(errs))
+    stage = _stage()
     et = c.get("edit_type", "skill")
     entry = {
         "timestamp": c.get("timestamp") or datetime.now(timezone.utc).isoformat(),
@@ -50,16 +62,17 @@ def record_contract(c: Dict[str, Any], d: Path | None = None) -> Dict[str, Any]:
         "file_path": c.get("file_path", ""),
         "issue_number": c.get("issue_number"),
         "pr_number": c.get("pr_number"),
-        "failure_evidence": c["failure_evidence"],
-        "root_cause": c["root_cause"],
-        "targeted_fix": c["targeted_fix"],
-        "predicted_impact": c["predicted_impact"],
-        "auto_revert": c.get("auto_revert", et in _SAFE_REVERT),
+        "auto_revert": c.get("auto_revert", et in stage["safe_revert_edit_types"]),
         "prior_path": c.get("prior_path", ""),
         "prior_content": c.get("prior_content"),
         "verified": False,
         "verification_result": None,
     }
+    # The pinned contract decides what an edit must declare, so the record
+    # carries exactly those fields (validate_contract has already proven they
+    # are present and truthy).
+    for field in stage["required_fields"]:
+        entry[field] = c[field]
     p = _path(d)
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "a", encoding="utf-8") as f:
@@ -91,13 +104,18 @@ def verify_contracts(
 ) -> List[Dict[str, Any]]:
     """Verify unverified contracts against observed task deltas."""
     contracts = load_contracts(d)
+    keys = _stage()["predicted_impact_keys"]
     for c in contracts:
         if c.get("verified"):
             continue
         pi = c.get("predicted_impact", {})
-        preds = pi.get("cases", []) if isinstance(pi, dict) else []
-        if not preds and isinstance(pi, dict) and pi.get("should_flip"):
-            preds = [pi["should_flip"]]
+        preds: List[str] = []
+        for key in keys:
+            value = pi.get(key) if isinstance(pi, dict) else None
+            if isinstance(value, str):
+                preds.append(value)
+            elif isinstance(value, list):
+                preds.extend(v for v in value if isinstance(v, str))
         confirmed = any(observed.get(pc) for pc in preds if pc in observed)
         missed = any(observed.get(pc) is False for pc in preds if pc in observed)
         c["verified"] = True

@@ -462,6 +462,23 @@ def pinned_evidence_gate_rules(tmp_path, monkeypatch):
     return target
 
 
+@pytest.fixture
+def pinned_stage_contracts(tmp_path, monkeypatch):
+    """A seeded pinned stage-contract surface, as a deployed host has (#3569).
+
+    The edit and skill stages fail closed without their pinned copy, and
+    ``_hermetic_environment`` gives every test a fresh ``HERMES_HOME``. Tests
+    that exercise a missing or shadowed surface point
+    ``EVOLUTION_PINNED_STAGE_CONTRACTS`` at their own copy instead.
+    """
+    seed = PROJECT_ROOT / "scripts" / "evolution_stage_contracts.json"
+    target = tmp_path / "pinned" / seed.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(seed.read_bytes())
+    monkeypatch.setenv("EVOLUTION_PINNED_STAGE_CONTRACTS", str(target))
+    return target
+
+
 @pytest.fixture(autouse=True)
 def _reset_foreground_exit_fence():
     """A test that drives a hard-exit path raises the one-way foreground-spawn fence; lower it after."""

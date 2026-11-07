@@ -40,6 +40,11 @@ Slices shipped here:
     ``$EVOLUTION_PINNED_SECURITY_POLICY``), so a self-edit of this module cannot
     loosen it. A missing/shadowed policy surface fails closed
     (``policy-unavailable``).
+  * **Slice 2c** (#3569) - the stage contracts (required edit fields,
+    safe-revert edit types, skill replay baseline/roots) are pinned data too
+    (``evolution_stage_contracts.json``, override
+    ``$EVOLUTION_PINNED_STAGE_CONTRACTS``), so a self-edit of the edit or
+    skill stage cannot rewrite the contract that judges it.
   * **Slice 4** (pinned safe-fallback set) — ``load_safe_fallbacks`` /
     ``resolve_pinned_fallback`` expose a versioned ``safe_fallbacks`` set of
     human-vetted, pinned alternative targets. When a proposal is blocked on a
@@ -110,17 +115,19 @@ def pinned_rules_path() -> Path:
 def install_pinned_seed(*, force: bool = False) -> list[Path]:
     """Seed every pinned surface a deploy owes the host.
 
-    The invariant rulebook (#3560/#3563), the evidence-gate thresholds (#3567)
-    and the warn/block security policy (#3568). The stage contracts are the
-    remaining slice of #3518. Returns the paths written.
+    The invariant rulebook (#3560/#3563), the evidence-gate thresholds (#3567),
+    the warn/block security policy (#3568) and the stage contracts (#3569).
+    Returns the paths written.
     """
     from evolution_evidence_gate_rules import install_pinned_rules as _install_evidence
     from evolution_security_policy import install_pinned_rules as _install_policy
+    from evolution_stage_contracts import install_pinned_rules as _install_stage
 
     return [
         install_pinned_rules(force=force),
         _install_evidence(force=force),
         _install_policy(force=force),
+        _install_stage(force=force),
     ]
 
 
