@@ -33,6 +33,13 @@ Slices shipped here:
     hosts that do neither. The filter refuses to run when that surface is missing
     or shadowed by an in-tree copy, so a self-edit cannot weaken the rules it is
     judged against.
+  * **Slice 6** (#3568) — the warn/block POLICY the rules apply (stakes ladder,
+    fail-safe default, ``enforce_at`` floor, scanned text/path fields and
+    high-stakes path fragments) is pinned data too
+    (``evolution_security_policy.json``, override
+    ``$EVOLUTION_PINNED_SECURITY_POLICY``), so a self-edit of this module cannot
+    loosen it. A missing/shadowed policy surface fails closed
+    (``policy-unavailable``).
   * **Slice 4** (pinned safe-fallback set) — ``load_safe_fallbacks`` /
     ``resolve_pinned_fallback`` expose a versioned ``safe_fallbacks`` set of
     human-vetted, pinned alternative targets. When a proposal is blocked on a
@@ -103,13 +110,18 @@ def pinned_rules_path() -> Path:
 def install_pinned_seed(*, force: bool = False) -> list[Path]:
     """Seed every pinned surface a deploy owes the host.
 
-    The invariant rulebook (#3560/#3563) and, since #3567, the evidence-gate
-    thresholds and markers. The security policy and the stage contracts are the
-    remaining slices of #3518 and are not pinned yet. Returns the paths written.
+    The invariant rulebook (#3560/#3563), the evidence-gate thresholds (#3567)
+    and the warn/block security policy (#3568). The stage contracts are the
+    remaining slice of #3518. Returns the paths written.
     """
     from evolution_evidence_gate_rules import install_pinned_rules as _install_evidence
+    from evolution_security_policy import install_pinned_rules as _install_policy
 
-    return [install_pinned_rules(force=force), _install_evidence(force=force)]
+    return [
+        install_pinned_rules(force=force),
+        _install_evidence(force=force),
+        _install_policy(force=force),
+    ]
 
 
 def install_pinned_rules(
@@ -168,33 +180,20 @@ _CHECKS = ("human_gating", "forbidden_paths", "forbidden_patterns")
 # Stakes ladder (slice 3 — staged rollout). A proposal's ``stakes`` (explicit
 # field, else inferred from its target path) selects how aggressively the
 # immutable floor is applied. Rules declare ``enforce_at`` — the minimum stakes
-# at which the rule BLOCKS. A violation of a rule whose threshold is above the
-# proposal's stakes is demoted to an ADVISORY (non-blocking) finding, so a new
-# strict rule can be rolled out staged (advisory on high-stakes targets first,
-# blocking on low-stakes ones) without an abrupt all-or-nothing flip.
-_STAKES_ORDER = ("low", "medium", "high")
-_DEFAULT_STAKES = "high"  # fail safe: an unclassifiable proposal is high-stakes
-# Backward-compatible default for a rule's ``enforce_at`` floor: a rule with no
-# ``enforce_at`` always blocks (threshold = low — the easiest to meet). This
-# preserves the pre-slice-3 behavior where every hard rule blocked every
-# proposal. Staged rollout is OPT-IN: a rule that wants advisory-on-high-stakes
-# explicitly declares ``enforce_at: high`` (or ``medium``).
-_DEFAULT_ENFORCE_AT = "low"
+# at which the rule BLOCKS; below that floor a finding is ADVISORY.
+#
+# Since #3568 every value below (ladder, fail-safe default, enforce-at floor,
+# scanned fields, high-stakes fragments) is PINNED DATA, not a constant: a
+# self-edit of this module must not be able to loosen the policy it is judged
+# against. ``_policy_value`` fails closed when the pinned surface is missing
+# or shadowed, and ``check_proposal`` reports that as ``policy-unavailable``.
 
-# Default text fields scanned by ``forbidden_patterns`` when a rule does not
-# declare its own ``text_fields``.
-_DEFAULT_TEXT_FIELDS = (
-    "delta",
-    "text",
-    "rationale",
-    "title",
-    "body",
-    "content",
-    "summary",
-)
 
-# Default path-bearing fields scanned by ``forbidden_paths``.
-_DEFAULT_PATH_FIELDS = ("path", "file", "target", "target_file", "files")
+def _policy_value(key: str) -> Any:
+    """One warn/block policy value; fail closed if the pinned surface is unusable."""
+    from evolution_security_policy import load_policy
+
+    return load_policy()[key]
 
 
 def _rules_path() -> Path:
@@ -278,13 +277,14 @@ def _walk_paths(obj: Any, fields: Tuple[str, ...]) -> List[str]:
 def _stakes_rank(stakes: Any) -> int:
     """Rank a stakes label on the ``low < medium < high`` ladder.
 
-    Unknown values are coerced to the safe default (high). Returns an index
-    into ``_STAKES_ORDER`` so callers can compare with ``>=``.
+    Unknown values are coerced to the pinned safe default (high). Returns an
+    index into the pinned stakes ladder so callers can compare with ``>=``.
     """
+    order = tuple(_policy_value("stakes_order"))
     label = str(stakes or "").strip().lower()
-    if label in _STAKES_ORDER:
-        return _STAKES_ORDER.index(label)
-    return _STAKES_ORDER.index(_DEFAULT_STAKES)
+    if label in order:
+        return order.index(label)
+    return order.index(str(_policy_value("default_stakes")))
 
 
 def classify_stakes(obj: Any) -> Tuple[str, str]:
@@ -293,35 +293,30 @@ def classify_stakes(obj: Any) -> Tuple[str, str]:
     ``label`` is one of ``low``/``medium``/``high``. ``source`` is ``"explicit"``
     (the proposal carried its own ``stakes`` field), ``"inferred"`` (from its
     target path), or ``"default"`` (fail-safe high for a pathless/unclassifiable
-    proposal). Pure + deterministic — no IO, no clock.
+    proposal). Deterministic — reads only the pinned policy, never the clock.
     """
+    order = tuple(_policy_value("stakes_order"))
+    default = str(_policy_value("default_stakes"))
     if isinstance(obj, dict) and isinstance(obj.get("stakes"), str):
         label = obj["stakes"].strip().lower()
-        if label in _STAKES_ORDER:
+        if label in order:
             return label, "explicit"
         # An explicit but unknown label is not silently trusted — fail safe.
-        return _DEFAULT_STAKES, "default"
+        return default, "default"
     if isinstance(obj, dict):
         # Infer from the target path. Distinguish an inferred-HIGH (a path hit
         # the high-risk fragments) from a fail-safe default-HIGH (no path at
         # all): both return "high", but only the former is source="inferred".
-        paths = _walk_paths(obj, _DEFAULT_PATH_FIELDS)
+        paths = _walk_paths(obj, tuple(_policy_value("default_path_fields")))
         if not paths:
-            return _DEFAULT_STAKES, "default"
-        high_fragments = (
-            "evolution_merge_gate",
-            "evolution_harness_gate",
-            "register_evolution_cron",
-            "evolution_orchestrator",
-            "tools/approval",
-            "evolution_*_gate.py",
-        )
+            return default, "default"
+        high_fragments = tuple(_policy_value("high_stakes_path_fragments"))
         for p in paths:
             pl = p.lower()
             if any(frag in pl for frag in high_fragments):
                 return "high", "inferred"
         return "medium", "inferred"
-    return _DEFAULT_STAKES, "default"
+    return default, "default"
 
 
 def _rule_enforces_at(rule: Dict[str, Any], stakes_rank: int) -> bool:
@@ -333,7 +328,8 @@ def _rule_enforces_at(rule: Dict[str, Any], stakes_rank: int) -> bool:
     declares a higher floor (e.g. ``enforce_at: high``) is rolled out staged:
     below that floor a finding becomes advisory instead of blocking.
     """
-    threshold = str(rule.get("enforce_at") or _DEFAULT_ENFORCE_AT).strip().lower()
+    floor = _policy_value("default_enforce_at")
+    threshold = str(rule.get("enforce_at") or floor).strip().lower()
     return stakes_rank >= _stakes_rank(threshold)
 
 
@@ -391,7 +387,11 @@ def resolve_pinned_fallback(
             return None
     if not isinstance(proposal, dict):
         return None
-    paths = _walk_paths(proposal, _DEFAULT_PATH_FIELDS)
+    try:
+        fields = tuple(_policy_value("default_path_fields"))
+    except ValueError:
+        return None
+    paths = _walk_paths(proposal, fields)
     if not paths:
         return None
     for entry in load_safe_fallbacks(rules):
@@ -426,7 +426,7 @@ def _check_human_gating(
 def _check_forbidden_paths(
     proposal: Dict[str, Any], rule: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    fields = tuple(rule.get("path_fields") or _DEFAULT_PATH_FIELDS)
+    fields = tuple(rule.get("path_fields") or _policy_value("default_path_fields"))
     fragments = [str(f).lower() for f in rule.get("forbidden_fragments", [])]
     violations: List[Dict[str, Any]] = []
     for p in _walk_paths(proposal, fields):
@@ -446,7 +446,7 @@ def _check_forbidden_paths(
 def _check_forbidden_patterns(
     proposal: Dict[str, Any], rule: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    fields = tuple(rule.get("text_fields") or _DEFAULT_TEXT_FIELDS)
+    fields = tuple(rule.get("text_fields") or _policy_value("default_text_fields"))
     patterns = [re.compile(str(p), re.IGNORECASE) for p in rule.get("patterns", [])]
     violations: List[Dict[str, Any]] = []
     for field, text in _walk_text_fields(proposal, fields).items():
@@ -490,27 +490,33 @@ def check_proposal(
     # fail-safe default) and use each rule's ``enforce_at`` floor to decide
     # whether a finding BLOCKS or is merely advisory. Backwards compatible:
     # a rule with no ``enforce_at`` blocks every proposal, exactly as before.
-    stakes, stakes_source = classify_stakes(proposal)
-    stakes_rank = _stakes_rank(stakes)
-
-    blocking: List[Dict[str, Any]] = []
-    advisory: List[Dict[str, Any]] = []
-    for rule in rules.get("rules", []):
-        check = rule.get("check")
-        if check == "human_gating":
-            found = _check_human_gating(proposal, rule)
-        elif check == "forbidden_paths":
-            found = _check_forbidden_paths(proposal, rule)
-        elif check == "forbidden_patterns":
-            found = _check_forbidden_patterns(proposal, rule)
-        else:  # unknown check type -> ignored (never crash)
-            continue
-        if not found:
-            continue
-        if _rule_enforces_at(rule, stakes_rank):
-            blocking.extend(found)
-        else:
-            advisory.extend(found)
+    try:
+        stakes, stakes_source = classify_stakes(proposal)
+        stakes_rank = _stakes_rank(stakes)
+        blocking: List[Dict[str, Any]] = []
+        advisory: List[Dict[str, Any]] = []
+        for rule in rules.get("rules", []):
+            check = rule.get("check")
+            if check == "human_gating":
+                found = _check_human_gating(proposal, rule)
+            elif check == "forbidden_paths":
+                found = _check_forbidden_paths(proposal, rule)
+            elif check == "forbidden_patterns":
+                found = _check_forbidden_patterns(proposal, rule)
+            else:  # unknown check type -> ignored (never crash)
+                continue
+            if not found:
+                continue
+            if _rule_enforces_at(rule, stakes_rank):
+                blocking.extend(found)
+            else:
+                advisory.extend(found)
+    except ValueError as exc:
+        # Missing/shadowed policy surface: fail closed, never a silent pass.
+        return {
+            "ok": False,
+            "violations": [{"rule": "policy-unavailable", "reason": str(exc)}],
+        }
 
     result: Dict[str, Any] = {
         "ok": not blocking,
