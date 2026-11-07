@@ -676,11 +676,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "before running tests (pre-PR gate for the autonomous pipeline; default: off)",
     )
 
-    parser.add_argument("--contract-base", default="origin/main",
-                        help="Immutable baseline ref for skill contract replay")
+    parser.add_argument("--contract-base", default=None,
+                        help="Immutable baseline ref for skill contract replay "
+                        "(default: the pinned stage contract's baseline)")
     args = parser.parse_args(argv)
     from evolution_skill_contracts import check_repository_edits
-    contract_errors = check_repository_edits(args.repo_root or Path.cwd(), args.contract_base)
+    contract_errors = check_repository_edits(
+        args.repo_root or Path.cwd(), args.contract_base or None
+    )
     if contract_errors:
         print("\n".join(contract_errors), file=sys.stderr)
         return 1

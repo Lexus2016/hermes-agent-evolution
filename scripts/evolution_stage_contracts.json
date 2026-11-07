@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "edit_contract": {
+    "required_fields": ["failure_evidence", "root_cause", "targeted_fix", "predicted_impact"],
+    "predicted_impact_keys": ["should_flip", "cases"],
+    "safe_revert_edit_types": ["skill", "memory", "prompt", "config"]
+  },
+  "skill_contract": {
+    "baseline": "origin/main",
+    "scanned_roots": ["skills/", "optional-skills/"],
+    "skill_filename": "SKILL.md",
+    "refuse_symlinks": true
+  }
+}

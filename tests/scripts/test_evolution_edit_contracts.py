@@ -13,6 +13,8 @@ from evolution_edit_contracts import (  # noqa: E402
     verify_contracts,
 )
 
+pytestmark = pytest.mark.usefixtures("pinned_stage_contracts")
+
 _G = {
     "failure_evidence": "f",
     "root_cause": "n",

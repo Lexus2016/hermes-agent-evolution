@@ -7,23 +7,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.skill_contracts import check_contract_edit
 
 
-def check_repository_edits(root, base="origin/main"):
+def check_repository_edits(root, base=None):
+    from evolution_stage_contracts import load_stage_contracts
+
     root = Path(root)
+    try:
+        stage = load_stage_contracts()["skill_contract"]
+    except ValueError as exc:
+        # Fail closed: an unusable pinned surface refuses the replay, it does
+        # not fall back to the defaults this file used to hardcode (#3569).
+        return [f"Skill contract surface unavailable; cannot verify replay: {exc}"]
+    base = base or stage["baseline"]
+    roots = tuple(stage["scanned_roots"])
+    suffix = "/" + stage["skill_filename"]
+
     def git(*args):
         return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8",
                               errors="strict", check=True).stdout
     try:
         baseline = git("rev-parse", "--verify", f"{base}^{{commit}}").strip()
-        paths = set(git("diff", "--name-only", "--no-renames", "-z", baseline, "--", "skills/", "optional-skills/").split("\0"))
-        paths.update(git("ls-files", "--others", "--exclude-standard", "-z", "--", "skills/", "optional-skills/").split("\0"))
+        paths = set(git("diff", "--name-only", "--no-renames", "-z", baseline, "--", *roots).split("\0"))
+        paths.update(git("ls-files", "--others", "--exclude-standard", "-z", "--", *roots).split("\0"))
         errors = []
         for path in sorted(paths):
-            if not path.endswith("/SKILL.md"):
+            if not path.endswith(suffix):
                 continue
             existed = bool(git("ls-tree", baseline, "--", path).strip())
             old = git("show", f"{baseline}:{path}") if existed else None
             target = root / path
-            if target.is_symlink():
+            if target.is_symlink() and stage["refuse_symlinks"]:
                 errors.append(f"{path}: symbolic-link skills require manual review")
                 continue
             new = target.read_text(encoding="utf-8") if target.exists() else ""

@@ -10,6 +10,8 @@ sys.path.insert(0, str(SCRIPTS))
 from evolution_skill_contracts import check_repository_edits
 from evolution_pre_pr_test_runner import main
 
+pytestmark = pytest.mark.usefixtures("pinned_stage_contracts")
+
 BASE = '''---
 name: example
 description: Example routing
