@@ -358,6 +358,62 @@ def _invalid(message: str) -> tuple[str, str]:
     return "rejected", tool_error(message, success=False)
 
 
+def memory_tool(
+    action: str = None,
+    target: str = "memory",
+    content: str = None,
+    old_text: str = None,
+    new_text: str = None,
+    source_class: str = DEFAULT_SOURCE_CLASS,
+    trust_tier: str = DEFAULT_TRUST_TIER,
+    source_filter: Optional[object] = None,
+    min_trust: Optional[str] = None,
+    include_superseded: bool = False,
+    operations: Optional[list[dict[str, Any]]] = None,
+    target_size: Optional[int] = None,
+    prefer: str = "longest",
+    memory_char_limit: Optional[int] = None,
+    store: Optional[MemoryStore] = None,
+) -> str:
+    """Single entry point for the memory tool. Dispatches to MemoryStore methods."""
+    if store is None:
+        return tool_error(
+            "Memory is not available. It may be disabled in config or this environment.",
+            success=False,
+        )
+
+    token = FAILURE_CLASS.set("other")
+    try:
+        outcome, result = _memory_tool(
+            action=action,
+            target=target,
+            content=content,
+            old_text=old_text,
+            new_text=new_text,
+            source_class=source_class,
+            trust_tier=trust_tier,
+            source_filter=source_filter,
+            min_trust=min_trust,
+            include_superseded=include_superseded,
+            operations=operations,
+            target_size=target_size,
+            prefer=prefer,
+            memory_char_limit=memory_char_limit,
+            store=store,
+        )
+        failure_class = "none" if outcome == "success" else FAILURE_CLASS.get()
+    finally:
+        FAILURE_CLASS.reset(token)
+
+    try:
+        from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
+        record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
+    except Exception:
+        pass
+
+    return result
+
+
 def _memory_tool(action, target, content, old_text, new_text, operations, store) -> tuple[str, str]:
     """``(outcome, result_json)``: ``rejected`` when refused or held before touching the store."""
     # An omitted optional string can arrive as "" (#90468): let the new_text alias fill it.
