@@ -30,6 +30,7 @@ from tools.environments.local_env_policy import (
     strip_profile_gate_env, strip_supervised_process_identity)
 from tools.environments.local_pythonpath import (
     _build_hermes_repo_root_aliases, _strip_hermes_owned_pythonpath_and_runtime_markers)
+from tools.environments.local_process import LocalProcessHandle
 
 
 _IS_WINDOWS = platform.system() == "Windows"

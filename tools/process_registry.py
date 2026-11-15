@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from tools.environments.local_process import LocalProcessHandle
 
 _IS_WINDOWS = platform.system() == "Windows"
 # systemd transient scopes exist only on Linux; gate every scope-path branch on this

@@ -17,6 +17,7 @@ from agent.memory_context import sanitize_context
 from agent.message_metadata import (
     CANONICAL_ROW, DATA_USE, DB_ROW_SNAPSHOT, lift_data_use, MESSAGE_UID, TOOL_CALL_UID, TOOL_CALL_UIDS,
     index_tool_call_uids, message_uid_or_none, resolve_tool_call_uid, mint_uid, stamp_message_uid)
+from agent.message_metadata import normalize_message_origin as _normalize_message_origin
 from agent.message_sanitization import _sanitize_surrogates, coalesce_tool_call_id
 from hermes_cli.timefmt import coerce_epoch
 from hermes_state_common import (

@@ -1418,7 +1418,7 @@ _PRE_DB_HANDLERS = {
     "discard": _cmd_discard,  # a gateway control (prompt.resolve_unknown), never a direct store write
     "adopt": _cmd_adopt,  # native resumes on the owner; reads its own store read-only
 }
-_OBSERVATIONAL_DB_ACTIONS = frozenset({"list", "stats", "pinned"})
+_OBSERVATIONAL_DB_ACTIONS = frozenset({"list", "stats", "pinned", "entropy", "cost"})
 _DB_HANDLERS = {
     "list": _cmd_list, "export": _cmd_export, "delete": _cmd_delete, "rename": _cmd_rename, "pinned": _cmd_pinned,
     "prune": partial(_cmd_prune_or_archive, action="prune"), "pin": partial(_cmd_pin, pinning=True),
@@ -1427,6 +1427,7 @@ _DB_HANDLERS = {
     "clean-markers": _cmd_clean_markers, "optimize-storage": _cmd_optimize_storage,
     "repair-routing": _cmd_repair_routing, "repair-prompts": _cmd_repair_prompts, "stats": _cmd_stats,
     "refresh-prompts": _cmd_refresh_prompts,
+    "entropy": _cmd_entropy, "cost": _cmd_cost,
 }
 
 

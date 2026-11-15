@@ -2151,6 +2151,78 @@ class _CronJobConfig:
     cron_default_provider: str
 
 
+DRIFT_SKIP_MARKER = "[drift_skip]"
+
+
+def _cron_drift_auto_repin_enabled(cfg: dict) -> bool:
+    """Whether drifted unpinned jobs auto-repin to the new baseline.
+
+    Default OFF — the #44585 spend-safety guard stays fail-closed unless the
+    user opts in with the literal YAML boolean ``true`` under
+    ``cron.model_drift_auto_repin``. Missing or malformed values stay off
+    (inverse of ``cron_model_drift_guard_enabled`` semantics).
+    """
+    cron_cfg = (cfg or {}).get("cron")
+    if not isinstance(cron_cfg, dict):
+        return False
+    return cron_cfg.get("model_drift_auto_repin", False) is True
+
+
+def _auto_repin_drifted_job(job_id: str, changes: str) -> bool:
+    """Best-effort baseline re-pin of a drifted job (warn-and-repin).
+
+    Refreshes the job's provider/model snapshots to the current global
+    baseline via ``repin_jobs`` so it tracks the new config and runs this
+    tick instead of staying skipped. Returns True only when the job was
+    actually updated; on any failure the caller falls back to the default
+    drift skip so a broken repin can never silently enable spend.
+    """
+    try:
+        from cron.jobs import repin_jobs
+
+        repinned = repin_jobs(job_id)
+    except Exception as exc:
+        logger.warning(
+            "Job '%s': drift auto-repin failed (%s); falling back to the "
+            "default drift skip.",
+            job_id,
+            exc,
+        )
+        return False
+    if not repinned:
+        logger.warning(
+            "Job '%s': drift auto-repin did not update the job (unresolvable "
+            "axis); falling back to the default drift skip.",
+            job_id,
+        )
+        return False
+    logger.warning(
+        "Job '%s': global inference config drifted since creation (%s); "
+        "cron.model_drift_auto_repin is enabled — snapshots re-pinned to "
+        "the new baseline and the job runs this tick instead of skipping.",
+        job_id,
+        changes,
+    )
+    return True
+
+
+def _snapshot_pin(job: dict, axis: str, current: str, job_id: str) -> str:
+    """The creation snapshot is an unpinned axis's effective pin: return it, logging once when it
+    differs from *current* (the live global default); ``""`` for legacy jobs without one, which keep
+    following the global default. A global model/provider change must never stop a cron job; a job
+    keeps running on what it was created under until the operator pins it or sets a cron.* fleet
+    default (#44585)."""
+    snapshot = str(job.get(f"{axis}_snapshot") or "").strip()
+    if snapshot and current and snapshot.lower() != current.lower():
+        logger.info(
+            "Job '%s': running on creation-snapshot %s %r (global default is now %r); "
+            "`hermes cron resnap %s` adopts the new default (stays unpinned), "
+            "`hermes cron edit %s --%s <value>` or cron.%s in config.yaml pins it.",
+            job_id, axis, snapshot, current, job_id, job_id, axis,
+            "model" if axis == "model" else "model_provider")
+    return snapshot
+
+
 def _load_cron_job_config(job: dict, job_id: str, job_name: str) -> _CronJobConfig:
     """Load config.yaml and resolve the run's model: per-job pin > cron.model (fleet default) >
     the main agent model (config ``model:``, then HERMES_MODEL) > the claimed welcome trial's. Re-read
@@ -5267,6 +5339,11 @@ from cron.scheduler_preflight import (
     BLOCKED_CONFIG_MARKER, BLOCKED_CONFIG_SILENT_MARKER, _cron_preflight_enabled,
     _empty_requested_mcp_toolsets, _is_transient_provider_resolve_error, _preflight_job_config,
 )
+
+
+DRIFT_SKIP_SILENT_MARKER = "[drift_skip:silent]"
+
+
 
 
 # `python -m cron.scheduler` entry: MUST stay below the split-module imports so the worker /

@@ -31,6 +31,67 @@ from agent.skill_utils import (
 )
 from tools.threat_patterns import scan_for_threats as _scan_for_threats
 from utils import atomic_json_write, file_cache_version
+from agent.context_load_instrument import (  # noqa: F401  (re-exported for #2442)
+    KIND_AGENTS,
+    KIND_CLAUDE,
+    KIND_CURSORRULES,
+    KIND_HERMES,
+    KIND_SOUL,
+    record_context_load as _record_context_load,
+)
+
+
+def _scan_context_seams(seam_text: str, label: str) -> Optional[str]:
+    """Catch a prompt injection split ACROSS the seam between concatenated context fragments."""
+    findings = _scan_for_threats(seam_text, scope="context")
+    if not findings:
+        return None
+    logger.warning(
+        "Context %s blocked (cross-source seam): %s", label, ", ".join(findings)
+    )
+    return f"[BLOCKED: prompt injection detected in {label} (cross-source seam)]"
+
+
+def _section_body(section: str) -> str:
+    """Return the body of a rendered ``## <label>\n\n<body>`` section."""
+    parts = section.split("\n\n", 1)
+    return parts[1] if len(parts) == 2 else section
+
+
+def _resolve_claude_imports(content: str, base_dir: Path) -> str:
+    """Inline single-level ``@path`` imports inside CLAUDE.md."""
+    base_resolved = base_dir.resolve()
+
+    def _replace(match: "re.Match[str]") -> str:
+        rel = match.group(1)
+        target = (base_dir / rel).resolve()
+        try:
+            target.relative_to(base_resolved)
+        except ValueError:
+            logger.debug("Ignoring CLAUDE.md import outside base dir: %s", rel)
+            return match.group(0)
+        if not target.is_file():
+            logger.debug("CLAUDE.md import not found: %s", target)
+            return match.group(0)
+        try:
+            imported = target.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.debug("Could not read CLAUDE.md import %s: %s", target, e)
+            return match.group(0)
+        if not imported:
+            return match.group(0)
+        imported = _strip_yaml_frontmatter(imported)
+        imported = _scan_context_content(imported, rel)
+        return f"> imported from {rel}\n{imported}"
+
+    return _IMPORT_RE.sub(_replace, content)
+
+
+_IMPORT_RE = re.compile(r"^[ \t]*@([^\s]+)[ \t]*$", re.MULTILINE)
+
+_IMPORT_MARKER_RE = re.compile(r"^>[ \t]*imported from[ \t].*$", re.MULTILINE)
+
+
 
 logger = logging.getLogger(__name__)
 

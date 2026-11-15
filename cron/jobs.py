@@ -49,6 +49,51 @@ from hermes_time import get_timezone
 from hermes_cli.observability.shared_metrics_gateway import record_cron_missed
 from utils import atomic_replace, atomic_write_text, fsync_directory, mkstemp_beside
 
+
+def _compute_provider_model_snapshots(
+    *, provider: Any, model: Any, base_url: Any, no_agent: Any,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Snapshot unpinned provider/model resolution: the scheduler runs the job on this snapshot after
+    a later global switch instead of silently changing spend. Pinned axes and no-agent jobs carry no
+    snapshot."""
+    normalized_provider = _normalize_job_optional_text(provider)
+    normalized_model = _normalize_job_optional_text(model)
+    normalized_base_url = _normalize_base_url(base_url)
+    if bool(no_agent):
+        return None, None
+
+    provider_snapshot: Optional[str] = None
+    model_snapshot: Optional[str] = None
+    if normalized_provider is None:
+        with contextlib.suppress(Exception):
+            from hermes_cli.config import read_user_config_raw
+            from hermes_cli.runtime_provider import resolve_runtime_provider
+
+            _cron_def_provider = None
+            try:
+                _cfg = read_user_config_raw() or {}
+                _cron_cfg = _cfg.get("cron") or {}
+                if isinstance(_cron_cfg, dict):
+                    _cron_def_provider = (
+                        _cron_cfg.get("model_provider") or _cron_cfg.get("provider")
+                    )
+            except Exception:
+                pass
+            runtime_kwargs = {"requested": _cron_def_provider or None}
+            # Delegate all rate-limit / 5xx retry to hermes's outer conversation loop, which honors
+            # Retry-After. The SDK default (max_retries=2) uses its own 1-2s backoff that ignores
+            # Retry-After and double-retries inside our loop — burning request slots against a bucket that
+            # won't refill for minutes. (#26293)
+            if normalized_base_url:
+                runtime_kwargs["explicit_base_url"] = normalized_base_url
+            snap = resolve_runtime_provider(**runtime_kwargs)
+            provider_snapshot = str(snap.get("provider") or "").strip().lower() or None
+    if normalized_model is None:
+        with contextlib.suppress(Exception):
+            model_snapshot = _resolve_default_model_snapshot() or None
+    return provider_snapshot, model_snapshot
+
+
 # croniter is imported lazily (slow import, only needed for cron exprs). HAS_CRONITER stays a
 # module attribute: a monkeypatched value wins because _ensure_croniter only probes while None
 # (and past `_croniter_retry_at`).

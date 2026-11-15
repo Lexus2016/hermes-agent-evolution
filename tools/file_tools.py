@@ -1459,6 +1459,33 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
 # Schemas + Registry
 # ---------------------------------------------------------------------------
 from tools.registry import registry, tool_error
+from pathlib import Path, PurePosixPath
+from tools.path_validation import format_nearby_hint, suggest_nearby_paths
+
+
+def _get_self_correction_retries() -> int:
+    """Return the configured self-correction retry threshold for patches."""
+    global _self_correction_retries_cached
+    if _self_correction_retries_cached is not None:
+        return _self_correction_retries_cached
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        patch_cfg = cfg.get("patch", {})
+        val = patch_cfg.get("self_correction_retries")
+        if (
+            isinstance(val, (int, float))
+            and 1 <= int(val) <= _MAX_SELF_CORRECTION_RETRIES
+        ):
+            _self_correction_retries_cached = int(val)
+            return _self_correction_retries_cached
+    except Exception:
+        pass
+    _self_correction_retries_cached = _DEFAULT_SELF_CORRECTION_RETRIES
+    return _self_correction_retries_cached
+
+
 
 
 def _check_file_reqs():
