@@ -26,6 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
 from hermes_constants import get_bundled_skills_dir, get_hermes_home, get_optional_skills_dir
 from agent.skill_utils import ESSENTIAL_SKILLS, is_excluded_skill_path
 from tools.skill_usage import read_skill_name
+from tools.skill_usage import read_skill_name as _read_skill_name
 from tools.skills_sync_optional import (
     _backfill_optional_provenance, _ignore_runtime_cache, _is_runtime_cache, _read_hub_install_paths,
 )
@@ -177,6 +178,21 @@ def _discover_bundled_skills(bundled_dir: Path) -> list[tuple[str, Path]]:
         (read_skill_name(md, md.parent.name), md.parent)
         for md in bundled_dir.rglob("SKILL.md")
         if not is_excluded_skill_path(md.relative_to(bundled_dir), root=bundled_dir)]
+
+
+def _dir_hash(directory: Path, *, include_runtime_cache: bool = False) -> str:
+    """MD5 of package paths/content, excluding generated runtime state.
+
+    The legacy option is only for proving an exact pre-filter origin match.
+    Keep the original path encoding so clean existing manifests remain valid.
+    """
+    hasher = hashlib.md5()
+    with suppress(OSError):
+        for fpath in sorted(directory.rglob("*")):
+            if (include_runtime_cache or not _is_runtime_cache(fpath, directory)) and fpath.is_file():
+                hasher.update(str(fpath.relative_to(directory)).encode("utf-8"))
+                hasher.update(fpath.read_bytes())
+    return hasher.hexdigest()
 
 
 def _compute_relative_dest(skill_dir: Path, bundled_dir: Path) -> Path:

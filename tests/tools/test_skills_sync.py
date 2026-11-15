@@ -12,9 +12,12 @@ from tools.skills_sync import (
     _get_bundled_dir,
     _read_manifest,
     read_skill_name,
+    _read_skill_name,
     _write_manifest,
     _discover_bundled_skills,
     dir_hash,
+    _dir_hash,
+    _compute_relative_dest,
     sync_skills,
 )
 from tools.skills_sync_bundled_ops import reset_bundled_skill
