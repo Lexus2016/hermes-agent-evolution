@@ -3,9 +3,7 @@ Entries are joined by ``ENTRY_DELIMITER``; budgets are in chars (model-independe
 Module state that tests monkeypatch (``get_memory_dir``, ``fcntl``/``msvcrt``) stays
 in ``tools.memory_tool`` and is read lazily."""
 
-import copy
-import hashlib
-import json
+import itertools
 import logging
 import os
 import re
@@ -239,6 +237,7 @@ DEFAULT_USER_CHAR_LIMIT = 1375
 # Why the last refusal/failure in this context happened, for the shared metric only (a closed name from
 # shared_metrics_contract.MEMORY_OP_FAILURE_CLASSES); never part of the result the model sees.
 FAILURE_CLASS: ContextVar[str] = ContextVar("memory_failure_class", default="other")
+_BACKUP_FAILED = " (BACKUP FAILED — file unchanged on disk)"
 
 
 def _error(message: str, failure_class: str, **extra) -> dict[str, Any]:
@@ -260,9 +259,9 @@ def _drift_error(path: Path, bak_path: str) -> dict[str, Any]:
         f"either rewrite the file as a clean §-delimited list of entries, or move the extra "
         f"content out — then retry. This guard exists to prevent silent data loss (issue #26045)."
     ), "drift", drift_backup=bak_path, remediation=(
-        "Open the .bak file, integrate the missing entries into the memory tool one at a time via "
-        f"memory(action=add, target='{_store_target(path.name)}', content=...), then remove or rewrite the "
-        "original file to a clean state."))
+        "Open the .bak file, integrate the missing entries into the memory tool with one add op per entry via "
+        f"memory(target='{_store_target(path.name)}', operations=[{{action: 'add', content: ...}}]), then remove or "
+        "rewrite the original file to a clean state."))
 
 
 def _read_failed_error(path: Path) -> dict[str, Any]:
@@ -684,211 +683,75 @@ class MemoryStore:
             os.close(raw_fd)
             raise
         with fd:
-            try:
+            def _flock(unlock: bool):
                 if fcntl:
-                    MemoryStore._acquire_fcntl_lock(fd)
+                    fcntl.flock(fd, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX)
                 else:
                     fd.seek(0)
-                    msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK if unlock else msvcrt.LK_LOCK, 1)
+            _flock(False)
+            try:
                 yield
             finally:
-                with suppress(OSError, IOError):
-                    if fcntl:
-                        fcntl.flock(fd, fcntl.LOCK_UN)
-                    elif msvcrt:
-                        fd.seek(0)
-                        msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
-
-    @staticmethod
-    def _acquire_fcntl_lock(fd, timeout: Optional[float] = None) -> None:
-        """Acquire an exclusive flock with bounded retry and backoff.
-
-        Uses LOCK_EX | LOCK_NB (non-blocking) in a retry loop with
-        exponential backoff (0.05s, 0.1s, 0.2s, ...). Raises TimeoutError
-        if the lock isn't acquired within *timeout* seconds.
-        """
-        from tools import memory_tool as _mt  # tests patch fcntl here
-        fcntl = _mt.fcntl
-        timeout = timeout if timeout is not None else MemoryStore._LOCK_TIMEOUT_SECONDS
-        deadline = time.monotonic() + timeout
-        wait = 0.05
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return  # acquired
-            except (OSError, IOError):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError(
-                        f"Could not acquire memory file lock within "
-                        f"{timeout:.0f}s — another process may hold it. "
-                        f"Lock file: {fd.name}"
-                    )
-                sleep_time = min(wait, remaining)
-                time.sleep(sleep_time)
-                wait = min(wait * 2, 1.0)  # cap at 1s per attempt
+                with suppress(OSError):
+                    _flock(True)
 
     @staticmethod
     def _path_for(target: str) -> Path:
-        mem_dir = get_memory_dir()
-        if target == "user":
-            return mem_dir / "USER.md"
-        return mem_dir / "MEMORY.md"
-
-    def _reload_target(self, target: str, *, skip_drift: bool = False):
-        """Re-read entries from disk into in-memory state.
-
-        Called under file lock to get the latest state before mutating.
-        Returns the backup path if external drift was detected (the on-disk
-        file contains content that wouldn't round-trip through our
-        parser/serializer, OR an entry larger than the store's char limit).
-        When drift is detected the caller must abort the mutation —
-        flushing would discard the un-roundtrippable content.
-        Returns ``None`` on clean reload.
-
-        Returns the ``_READ_FAILED`` sentinel when the file EXISTS but could not
-        be read. The caller MUST abort: the on-disk entries are unknown, so
-        overwriting from an assumed-empty view would wipe them. This is the real
-        exposure behind ``add`` — it skips the drift guard because appending is
-        safe, but that reasoning only holds when the reload actually saw the
-        file. A failed read reported as ``[]`` turned ``add`` into a full-file
-        rewrite down to a single entry.
-
-        When *skip_drift* is True the round-trip / entry-size check is
-        bypassed.  Used by the ``add`` action which appends without
-        rewriting, so existing content is never clobbered.
-        """
-        path = self._path_for(target)
-        raw, read_ok = self._read_raw_checked(path)
-        if not read_ok:
-            # Leave in-memory entries untouched and tell the caller to abort;
-            # persisting over an unreadable file would destroy it.
-            return _READ_FAILED
-        # Derive BOTH the drift check and the entry parse from the same raw
-        # snapshot. The drift guard used to re-read the file itself and treat
-        # a failed second read as "no drift" — so a read failure between the
-        # checked reload and the drift check let replace/remove/apply_batch
-        # rewrite the file from a stale view, silently discarding whatever an
-        # external writer had just added. One read, one snapshot, no window.
-        bak = None if skip_drift else self._detect_external_drift(target, raw)
-        fresh = self._parse_entries(raw)
-        fresh = list(dict.fromkeys(fresh))  # deduplicate
-        self._set_entries(target, fresh)
-        return bak
-
-    def save_to_disk(self, target: str):
-        """Persist entries to the appropriate file. Called after every mutation."""
-        get_memory_dir().mkdir(parents=True, exist_ok=True)
-        self._write_file(self._path_for(target), self._entries_for(target))
+        from tools import memory_tool  # get_memory_dir is monkeypatched there
+        return memory_tool.get_memory_dir() / ("USER.md" if target == "user" else "MEMORY.md")
 
     def _entries_for(self, target: str) -> list[str]:
         return self.user_entries if target == "user" else self.memory_entries
 
     def _set_entries(self, target: str, entries: list[str]):
-        if target == "user":
-            self.user_entries = entries
-        else:
-            self.memory_entries = entries
+        setattr(self, "user_entries" if target == "user" else "memory_entries", entries)
 
     def _char_count(self, target: str) -> int:
-        entries = self._entries_for(target)
-        if not entries:
-            return 0
-        return len(ENTRY_DELIMITER.join(entries))
+        return len(ENTRY_DELIMITER.join(self._entries_for(target)))
+
+    def _char_limit(self, target: str) -> int:
+        return self.user_char_limit if target == "user" else self.memory_char_limit
 
     def _usage(self, target: str) -> str:
-        """``current/limit`` for recoverable tool errors (approval-time inventory)."""
+        return f"{self._char_count(target):,}/{self._char_limit(target):,}"
+
+    def _usage_pct(self, target: str, current: int) -> str:
         limit = self._char_limit(target)
-        return f"{self._char_count(target):,}/{limit:,}"
+        return f"{min(100, int((current / limit) * 100)) if limit > 0 else 0}% — {current:,}/{limit:,} chars"
 
-    def _evict_to_fit(
-        self,
-        target: str,
-        new_entry: str,
-        limit: int,
-    ) -> Optional[list[str]]:
-        """Evict OLDEST entries until ``new_entry`` fits ``limit`` (issue #1283).
-
-        Returns the list of evicted DISPLAY texts (oldest-first), or ``None``
-        when the add still doesn't fit — e.g. the single new entry alone
-        exceeds the limit, or the safety floor (``auto_evict_keep_min``) was
-        reached before it fit. The caller must treat ``None`` as "give up and
-        return the consolidation-failure response" so behaviour degrades
-        gracefully to the pre-#1283 path.
-
-        Entries are stored in insertion order (a §-delimited file is
-        append-mostly), so index 0 is the oldest — that is what we evict.
-        We never evict below ``auto_evict_keep_min`` entries. Only the
-        ``memory`` target is eligible; ``user`` profile facts are scarce and
-        high-value, so they keep the manual-consolidation path.
-        """
-        if not self.auto_evict_on_full or target != "memory":
-            return None
-
-        entries = self._entries_for(target)
-        # Working copy we mutate locally; only commit back if it fits.
-        working = list(entries)
-        evicted: list[str] = []
-
-        while True:
-            candidate = working + [new_entry]
-            if len(ENTRY_DELIMITER.join(candidate)) <= limit:
-                return evicted
-            # Can't evict further without breaching the safety floor.
-            if len(working) <= self.auto_evict_keep_min:
-                return None
-            evicted.append(parse_provenance(working.pop(0))[0])
-
-    def _failure_with_entries(self, target: str, message: str, *,
-                              current_size: Optional[int] = None,
-                              max_size: Optional[int] = None,
-                              would_be_size: Optional[int] = None,
-                              **extra) -> dict[str, Any]:
+    def _failure_with_entries(self, target: str, message: str) -> dict[str, Any]:
         """Over-budget consolidation failure carrying the live entries so the model can consolidate."""
-        payload = {
-            "current_entries": self._entries_for(target),
-            "usage": self._usage(target),
-            "current_size": current_size if current_size is not None else self._char_count(target),
-            "max_size": max_size if max_size is not None else self._char_limit(target),
-        }
-        if would_be_size is not None:
-            payload["would_be_size"] = would_be_size
-        payload.update(extra)
         return self._consolidation_failure(
-            _error(message, "over_budget", **payload))
+            _error(message, "over_budget", current_entries=self._entries_for(target), usage=self._usage(target)))
+
+    def _add_overflow(self, target: str, content: str, limit: int) -> dict[str, Any]:
+        """A lone add over budget, legacy or one-item batch: the model has not consolidated yet,
+        so the live entries come back (its prompt snapshot may predate other sessions' writes)."""
+        over = len(ENTRY_DELIMITER.join(self._entries_for(target) + [content])) - limit
+        return self._failure_with_entries(target, (
+            f"Memory at {self._char_count(target):,}/{limit:,} chars; adding this entry ({len(content)} chars) "
+            f"would exceed the limit by {over:,} chars. Retry as ONE 'operations' batch that "
+            f"removes or shortens (patch) stale entries from current_entries below to free at least "
+            f"{over:,} chars AND adds this entry — the limit is checked only on the batch result."))
 
     def _batch_failure(self, target: str, message: str, failure_class: str,
-                       closest_entries: Optional[list[str]] = None, *,
-                       current_size: Optional[int] = None,
-                       max_size: Optional[int] = None,
-                       would_be_size: Optional[int] = None,
-                       **extra) -> dict[str, Any]:
+                       closest_entries: Optional[list[str]] = None) -> dict[str, Any]:
         """Batch-abort failure WITHOUT ``current_entries``: the store did not change and the
         caller already holds the inventory, so echoing it made each consolidation retry
         grow the context it was invoked to shrink (#97316). A zero-match op carries only
         its few ``closest_entries``."""
-        payload = {
-            "usage": self._usage(target),
-        }
-        if closest_entries:
-            payload["closest_entries"] = closest_entries
-        if current_size is not None:
-            payload["current_size"] = current_size
-        if max_size is not None:
-            payload["max_size"] = max_size
-        if would_be_size is not None:
-            payload["would_be_size"] = would_be_size
-        payload.update(extra)
         return self._consolidation_failure(
             _error(message + " No operations were applied (batch is all-or-nothing).", failure_class,
-                   **payload))
+                   usage=self._usage(target),
+                   **({"closest_entries": closest_entries} if closest_entries else {})))
 
-    def _mutate(self, target: str, mutate, *, skip_drift: bool = False, limit_override: Optional[int] = None) -> dict[str, Any]:
+    def _mutate(self, target: str, mutate, *, skip_drift: bool = False) -> dict[str, Any]:
         """Lock, re-read from disk, run ``mutate(entries, limit)`` -> ``(new_entries, message)``
         or an error dict, then persist and return the success response. The reload aborts
         on an existing-but-unreadable file (even append-only ``add`` rewrites the whole
-        file) and, unless *skip_drift*, on external drift (flushing would discard
-        un-roundtrippable content). Drift check and parse use the SAME raw snapshot —
+        file) and, unless *skip_drift*, refuses a write that adds or rewrites text while an
+        entry is over the whole-file limit (it may hold free text a flush would discard). Drift check and parse use the SAME raw snapshot —
         a failed second read used to count as "no drift". The closure may return a
         third value, a dict merged into the success payload (``_error``'s ``**extra``
         convention) — e.g. the full text a replace overwrote (#117952). ANY dict the closure
@@ -899,210 +762,68 @@ class MemoryStore:
             raw, read_ok = self._read_raw_checked(path)
             if not read_ok:
                 return _read_failed_error(path)
-            bak = None if skip_drift else self._detect_external_drift(target, raw)
-            self._set_entries(target, list(dict.fromkeys(self._parse_entries(raw))))
-            if bak:
-                return _drift_error(path, bak)
-            effective_limit = self._char_limit(target, limit_override)
-            result = mutate(self._entries_for(target), effective_limit)
+            oversized = not skip_drift and self._has_oversized_entry(target, raw)
+            before = list(dict.fromkeys(self._parse_entries(raw)))
+            self._set_entries(target, before)
+            FAILURE_CLASS.set("other")  # read below: only this closure's refusal counts
+            result = mutate(self._entries_for(target), self._char_limit(target))
             if isinstance(result, dict):
+                # Over budget beside an oversized entry: that entry is the obstacle, so report
+                # the drift (with its snapshot) rather than a budget the model cannot meet.
+                if oversized and result.get("success") is False and FAILURE_CLASS.get() == "over_budget":
+                    return _drift_error(path, self._drift_backup(target, raw))
                 return result
+            extra_fields = dict(result[2]) if len(result) > 2 else {}
+            # An oversized entry is either free text appended without a delimiter or an entry written before the limit was lowered. Pruning is the way
+            # back under a lowered limit, so a write that only deletes entries proceeds; one that
+            # drops an oversized entry keeps the snapshot first, as it may hold appended text.
+            if oversized:
+                if not set(result[0]) <= set(before):
+                    return _drift_error(path, self._drift_backup(target, raw))
+                limit = self._char_limit(target)
+                if any(len(e) > limit for e in before if e not in result[0]):
+                    bak = self._drift_backup(target, raw)
+                    if bak.endswith(_BACKUP_FAILED):  # no copy, no delete of possibly glued text
+                        return _drift_error(path, bak)
+                    extra_fields["drift_backup"] = bak
             self._set_entries(target, result[0])
             from hermes_constants import mkdir_under_hermes_home
 
             mkdir_under_hermes_home(path.parent)
             self._write_file(path, result[0])
-            extra_fields = result[2] if len(result) > 2 else {}
-            return self._success_response(target, result[1], limit=effective_limit, **extra_fields)
+            return self._success_response(target, result[1], **extra_fields)
 
-    def _evict_replacement_to_fit(
-        self,
-        target: str,
-        entries: list[str],
-        new_text: str,
-        limit: int,
-    ) -> Optional[tuple[list[str], list[str]]]:
-        """Evict OLDEST entries (never ``new_text``) until the list fits ``limit``.
-
-        Issue #129 — the replace-path twin of ``_evict_to_fit`` (#1283): the
-        add path auto-evicts on overflow but replace still hard-rejected, so
-        nightly consolidation (dreaming) writes at cap died with
-        'Replacement would put memory at N/M chars'. The caller passes the
-        working list ALREADY containing the replacement at its target index;
-        this evicts the oldest OTHER entries (matched by stored text so the
-        replacement itself is never a victim) until the list fits.
-
-        Returns ``(evicted_display_texts, surviving_entries)`` — oldest-first
-        texts plus the exact surviving list — or ``None`` when it still
-        doesn't fit (the replacement alone exceeds the limit, or the safety
-        floor ``auto_evict_keep_min`` was reached). Callers must treat
-        ``None`` as "give up and return the consolidation-failure response",
-        exactly like the add path. Only the ``memory`` target is eligible;
-        ``user`` facts are scarce/high-value and keep the manual path.
-        """
-        if not self.auto_evict_on_full or target != "memory":
-            return None
-
-        working = list(entries)
-        evicted: list[str] = []
-
-        while True:
-            if len(ENTRY_DELIMITER.join(working)) <= limit:
-                return evicted, working
-            # Can't evict further without breaching the safety floor.
-            if len(working) <= self.auto_evict_keep_min:
-                return None
-            # Oldest entry that is not the replacement itself.
-            victim = next(
-                (i for i, e in enumerate(working) if e != new_text),
-                None,
-            )
-            if victim is None:
-                return None
-            evicted.append(parse_provenance(working.pop(victim))[0])
-
-    def _char_limit(self, target: str, dynamic_limit: Optional[int] = None) -> int:
-        """Return the effective char limit for ``target``.
-
-        Per-issue #517, a caller may pass a one-off ``dynamic_limit`` to
-        ``apply_batch``. It is only honoured for the ``memory`` target when
-        ``self.allow_batch_override`` is True; the ``user`` target always uses
-        its configured limit. The system-prompt snapshot always uses the
-        configured limits, so a dynamic batch override cannot invalidate the
-        prefix cache.
-        """
-        if target == "user":
-            return self.user_char_limit
-        if dynamic_limit is None or not self.allow_batch_override:
-            return self.memory_char_limit
-        return int(dynamic_limit)
-
-    def _gate_write(self, content: str):
-        """Decide whether ``content`` may be written, reusing the threat scanner.
-
-        Returns ``(error, effective_content, guard_event)``:
-
-        * ``error`` — a non-None error string means BLOCK the write.
-        * ``effective_content`` — the content to actually store (may differ from
-          the input only when a guard ``strip`` action fired).
-        * ``guard_event`` — an optional structured dict describing a warn/strip
-          decision, for the caller to log; ``None`` for the legacy path and for
-          clean content.
-
-        DEFAULT-OFF / BACKWARD-COMPAT (issue #315): when ``self._guard`` is
-        ``None`` (the default) this collapses to the pre-#315 behaviour — the
-        existing binary ``_scan_memory_content`` block — so clean writes pass and
-        poisoned writes are refused exactly as before, with no strip/warn and no
-        event. The guard only participates when explicitly configured on.
-        """
-        if self._guard is None:
-            # Legacy path: binary block, byte-identical to pre-#315.
-            return _scan_memory_content(content), content, None
-
-        # The entry's provenance is already resolved by the caller into
-        # self._last_provenance; the guard routes its action off the source
-        # class. It reuses the existing scanner internally for detection.
-        outcome = self._guard.evaluate(content, self._last_provenance)
-        if not outcome.allowed:
-            return outcome.message, content, None
-        if outcome.action in ("warn", "strip"):
-            return None, outcome.content, outcome.to_event()
-        # allow (clean content, or an explicit allow rule): no event.
-        return None, outcome.content, None
-
-    def add(
-        self,
-        target: str,
-        content: str,
-        source_class: str = DEFAULT_SOURCE_CLASS,
-        trust_tier: str = DEFAULT_TRUST_TIER,
-    ) -> dict[str, Any]:
-        """Append a new entry. Returns error if it would exceed the char limit.
-
-        ``source_class`` / ``trust_tier`` tag the entry's provenance (#316).
-        When both are the safe defaults the entry is stored verbatim (no
-        trailer) so the on-disk format is byte-identical to pre-#316.
-        """
+    def add(self, target: str, content: str) -> dict[str, Any]:
+        """Append a new entry. Returns error if it would exceed the char limit."""
         content = content.strip()
         if not content:
             return _error("Content cannot be empty.", "missing_content")
-
-        prov_error = _validate_provenance(source_class, trust_tier)
-        if prov_error:
-            return _error(prov_error, "invalid_provenance")
-
-        # Scan the user-visible content (not the provenance trailer) for
-        # injection/exfiltration before accepting. With no guard configured
-        # (default) this is the pre-#315 binary block; a configured guard may
-        # instead warn (store as-is) or strip (store the excised content).
-        if self._guard is not None:
-            self._last_provenance = _make_provenance(source_class, trust_tier)
-        scan_error, content, guard_event = self._gate_write(content)
-        if scan_error:
+        if scan_error := _scan_memory_content(content):
             return _error(scan_error, "scan_blocked")
-        if guard_event is not None:
-            _log_guard_event("add", target, guard_event)
-
-        stored = encode_provenance(content, source_class, trust_tier)
 
         def _add(entries, limit):
-            if stored in entries:
+            if content in entries:
                 return self._success_response(target, "Entry already exists (no duplicate added).")
-            candidate = entries + [stored]
-            new_total = len(ENTRY_DELIMITER.join(candidate))
-            if new_total > limit:
-                # Issue #1283: auto-evict oldest entries if configured
-                evicted = self._evict_to_fit(target, stored, limit)
-                if evicted is not None:
-                    working = list(entries)
-                    for _ in evicted:
-                        working.pop(0)
-                    working.append(stored)
-                    extra = {"evicted": evicted, "evicted_entries": evicted} if evicted else {}
-                    return working, "Entry added.", extra
-                return self._failure_with_entries(target, (
-                    f"Memory at {self._char_count(target):,}/{limit:,} chars; adding this entry ({len(content)} chars) "
-                    f"would exceed the limit by {new_total - limit:,} chars. Retry as ONE 'operations' batch that "
-                    f"removes or shortens (patch) stale entries from current_entries below to free at least "
-                    f"{new_total - limit:,} chars AND adds this entry — the limit is checked only on the batch result."),
-                    would_be_size=new_total, max_size=limit)
-            return candidate, "Entry added."
-
+            if len(ENTRY_DELIMITER.join(entries + [content])) > limit:
+                return self._add_overflow(target, content, limit)
+            return entries + [content], "Entry added."
+        # Append-only: skip the drift guard (appending never clobbers foreign
+        # content) but still refuse a failed read — add rewrites the WHOLE file.
         return self._mutate(target, _add, skip_drift=True)
 
-    def replace(
-        self,
-        target: str,
-        old_text: str,
-        new_content: str,
-        source_class: str = DEFAULT_SOURCE_CLASS,
-        trust_tier: str = DEFAULT_TRUST_TIER,
-        matched_entry: Optional[str] = None,
-    ) -> dict[str, Any]:
+    def replace(self, target: str, old_text: str, new_content: str,
+                matched_entry: Optional[str] = None) -> dict[str, Any]:
         """Find the entry containing old_text (whole-entry exact match first) and
         replace the WHOLE entry with new_content — old_text only locates the entry;
-        the matched span is not spliced into it.
-
-        ``source_class`` / ``trust_tier`` re-tag the replacement's provenance
-        (#316). Defaults keep the stored form trailer-free (byte-compatible).
-        """
+        the matched span is not spliced into it."""
         new_content = new_content.strip()
-        if not (old_text or "").strip():
+        if not old_text.strip():
             return _error("old_text cannot be empty.", "missing_old_text")
         if not new_content:
             return _error("new_content cannot be empty. Use 'remove' to delete entries.", "missing_content")
-        prov_error = _validate_provenance(source_class, trust_tier)
-        if prov_error:
-            return _error(prov_error, "invalid_provenance")
-        if self._guard is not None:
-            self._last_provenance = _make_provenance(source_class, trust_tier)
-        scan_error, new_content, guard_event = self._gate_write(new_content)
-        if scan_error:
+        if scan_error := _scan_memory_content(new_content):
             return _error(scan_error, "scan_blocked")
-        if guard_event is not None:
-            _log_guard_event("replace", target, guard_event)
-        stored_new = encode_provenance(new_content, source_class, trust_tier)
-        return self._edit(target, old_text.strip(), stored_new, matched_entry)
+        return self._edit(target, old_text.strip(), new_content, matched_entry)
 
     def patch(self, target: str, old_text: str, new_text: str,
               matched_entry: Optional[str] = None) -> dict[str, Any]:
@@ -1471,18 +1192,26 @@ class MemoryStore:
                 matched.append(previous_content)
                 if after is not None:
                     produced[i + 1] = after
-            if entries and not working:
+            if entries and not working and not (len(ops) == 1 and ops[0].get("action") == "remove"):
                 # #103419: a consolidation batch that removes the last entry would
-                # commit an empty file as a normal successful write. Refuse; single
-                # remove() is the deliberate-wipe path.
+                # commit an empty file as a normal successful write. Refuse; a batch of
+                # exactly one remove is the deliberate single delete (operations[] is the
+                # memory tool's only advertised shape), and unattended forks never get
+                # that far: the #105921 delete gate stages their removes.
                 label = self._path_for(target).name
                 return self._batch_failure(target, (
                     f"Refusing to empty {label}: this batch would remove every entry from a "
                     f"previously non-empty store. Keep at least one entry — merge overlapping "
                     f"entries into a shorter one instead of removing the last one. To delete the "
-                    f"final entry deliberately, use single remove() calls."), "would_empty")
+                    f"final entry deliberately, remove it alone in a one-item batch."), "would_empty")
             new_total = len(ENTRY_DELIMITER.join(working))  # budget check against the FINAL state only
-            if new_total > limit:
+            # A remove-only batch or a lone duplicate add never grows the store, so like the
+            # legacy remove/add it is not refused for excess left by a lowered cap.
+            grows = not (all(op.get("action") == "remove" for op in ops)
+                         or (len(ops) == 1 and working == entries))
+            if grows and new_total > limit:
+                if len(ops) == 1 and ops[0].get("action") == "add":  # the advertised single add
+                    return self._add_overflow(target, (ops[0].get("content") or ops[0].get("new_text") or "").strip(), limit)
                 return self._batch_failure(target, (
                     f"Applying all {len(operations)} operations {_over_limit(new_total, limit)} more. Add "
                     f"removes or shortening patches of other stale entries to the same batch, then retry."),
@@ -1627,69 +1356,33 @@ class MemoryStore:
         """Atomic temp-file + rename: readers never see a truncated file. Callers
         hold ``_file_lock`` (via ``_mutate``): a bare write from an earlier snapshot
         drops concurrent entries (#119668)."""
-        content = ENTRY_DELIMITER.join(entries)
         try:
-            atomic_write_text(path, content, tmp_prefix=".mem_")
-        except (OSError, IOError) as e:
+            atomic_write_text(path, ENTRY_DELIMITER.join(entries), tmp_prefix=".mem_")
+        except OSError as e:
             raise RuntimeError(f"Failed to write memory file {path}: {e}")
 
-    def _detect_external_drift(self, target: str, raw: str) -> Optional[str]:
-        """``.bak.<ts>`` snapshot path if *raw* shows external drift, else None. The one
-        signal is an entry over the whole-file limit: no tool-written entry can be, so it is
-        free-form text appended without delimiters, and replacing that "entry" would discard
-        it. Layout differences (blank lines around ``§``, empty entries, padding) are NOT
-        drift: parsing only strips whitespace, so the flush loses nothing but whitespace, and
-        refusing there blocked every replace/remove on a hand-formatted file for good (#107270)."""
-        if max(map(len, self._parse_entries(raw)), default=0) <= self._char_limit(target):
-            return None
+    def _has_oversized_entry(self, target: str, raw: str) -> bool:
+        """True when one entry in *raw* is longer than the whole-file limit. A tool write
+        never produces one, so it is free-form text appended without delimiters, or an entry
+        written before the limit was lowered. Layout differences (blank lines around ``§``,
+        empty entries, padding) are NOT drift: parsing only strips whitespace, so the flush
+        loses nothing but whitespace, and refusing there blocked every replace/remove on a
+        hand-formatted file for good (#107270)."""
+        return max(map(len, self._parse_entries(raw)), default=0) > self._char_limit(target)
+
+    def _drift_backup(self, target: str, raw: str) -> str:
+        """``.bak.<ts>[.<n>]`` snapshot of *raw* before a drift refusal or a delete that drops an
+        oversized entry. Created exclusively: two snapshots in the same second never overwrite
+        each other, since a later delete's snapshot no longer holds what an earlier one removed."""
         path = self._path_for(target)
-        bak_path = path.with_suffix(path.suffix + f".bak.{int(time.time())}")
-        try:
-            bak_path.write_text(raw, encoding="utf-8")
-        except OSError:
-            return str(bak_path) + " (BACKUP FAILED — file unchanged on disk)"
-        return str(bak_path)
-
-
-def load_on_disk_store() -> "MemoryStore":
-    """Build a fresh on-disk :class:`MemoryStore`, honoring configured char limits.
-
-    Use this from any context that has no live agent (the messaging gateway, the
-    Desktop GUI, the bare CLI ``/memory`` handler) but still needs to read or
-    apply approved memory writes. Mirrors how the live agent constructs its store
-    in ``agent/agent_init.py`` — including the user's ``memory.memory_char_limit``
-    / ``memory.user_char_limit`` overrides — so an approval applied without a live
-    agent enforces the SAME caps as one applied with one.
-
-    Falls back to the built-in defaults if config can't be loaded, so this can
-    never raise on a missing/unreadable config.
-    """
-    memory_char_limit = DEFAULT_MEMORY_CHAR_LIMIT
-    user_char_limit = DEFAULT_USER_CHAR_LIMIT
-    memory_enabled = True
-    user_profile_enabled = True
-    allow_batch_override = False
-    try:
-        from hermes_cli.config import load_config
-        from tools.memory_tool import get_builtin_memory_config, get_builtin_memory_store_flags
-
-        config = load_config() or {}
-        mem_cfg = get_builtin_memory_config(config)
-        memory_enabled, user_profile_enabled = get_builtin_memory_store_flags(config)
-        memory_char_limit = int(mem_cfg.get("memory_char_limit", memory_char_limit))
-        user_char_limit = int(mem_cfg.get("user_char_limit", user_char_limit))
-        allow_batch_override = bool(
-            mem_cfg.get("allow_batch_memory_char_limit_override", False)
-        )
-    except Exception:
-        pass  # config optional - fall back to defaults rather than break /memory
-
-    store = MemoryStore(
-        memory_char_limit=memory_char_limit,
-        user_char_limit=user_char_limit,
-        allow_batch_override=allow_batch_override,
-        memory_enabled=memory_enabled,
-        user_profile_enabled=user_profile_enabled,
-    )
-    store.load_from_disk()
-    return store
+        stem = path.suffix + f".bak.{int(time.time())}"
+        for n in itertools.count():
+            bak_path = path.with_suffix(stem + (f".{n}" if n else ""))
+            try:
+                with open(bak_path, "x", encoding="utf-8") as fh:
+                    fh.write(raw)
+                return str(bak_path)
+            except FileExistsError:
+                continue
+            except OSError:
+                return str(bak_path) + _BACKUP_FAILED

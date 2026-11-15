@@ -10,6 +10,7 @@ must never shadow a shipped provider. Changing this order is a breaking change.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -17,7 +18,7 @@ import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from hermes_cli.config import cfg_get
 from plugins import plugin_loader as _loader
@@ -226,10 +227,9 @@ def load_memory_provider(name: str, *, register_skills: Optional[bool] = None) -
         logger.debug("Memory provider '%s' not found in bundled, user plugins, or entry points", name)
         return None
     if provider_dir is not None and _explicitly_disabled(name, provider_dir):
-        # The Plugins hub / `hermes plugins disable` park a user-installed provider in
-        # ``plugins.disabled``; the loader must honour it or "disabled" is a lie in the UI.
-        logger.warning("Memory provider '%s' is disabled via plugins.disabled; run `hermes plugins enable %s` "
-                       "or change memory.provider.", name, name)
+        # The Plugins hub / `hermes plugins disable` (or an update that could not install it) park a
+        # user-installed provider in ``plugins.disabled``; the loader must honour it or "disabled" is a lie.
+        logger.warning("%s", parked_provider_notice(name))
         return None
 
     def _load(_dir):
@@ -437,10 +437,11 @@ class _ProviderCollector:
             base_ref="agent.memory_provider:MemoryProvider", ctx=self, before_reload=drop_hooks)
         return self.provider
 
-    def register_hook(self, hook_name, callback):
+    def register_hook(self, hook_name, callback, *, hold_stream=False):
         context = self._plugin_context()
         with context._manager._discovery_lock:
-            return context._manager._register_fallback_hook(context, self._hook_source, hook_name, callback)
+            return context._manager._register_fallback_hook(
+                context, self._hook_source, hook_name, callback, hold_stream=hold_stream)
 
     def register_memory_provider(self, provider):
         self.provider = provider
@@ -485,43 +486,38 @@ class _ProviderCollector:
 
     def _plugin_context(self):
         """A real ``PluginContext``, built once on demand: the common provider that only
-        calls ``register_memory_provider`` must not pay for importing the plugin manager.
-
-        Stamp ``source`` and ``path`` from the provider file so the #1389 hook-trust
-        gate sees a user plugin under ``<HERMES_HOME>/plugins/`` the same way general
-        discovery does. A pathless manifest is ``source=""`` and fails closed.
-        """
+        calls ``register_memory_provider`` must not pay for importing the plugin manager."""
         if self._context is None:
             from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
 
-            source, path = _memory_plugin_source_and_path(
-                self._hook_source[1] if self._hook_source else None,
-            )
-            manifest = PluginManifest(name=self.name, key=self.name, source=source, path=path)
+            manifest = PluginManifest(name=self.name, key=self.name)
             self._context = PluginContext(manifest, get_plugin_manager())
         return self._context
 
 
-def _memory_plugin_source_and_path(source_file: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Classify a memory-provider ``__file__`` the way ``scan_directory`` labels plugins."""
-    if not source_file:
-        return "", None
-    plugin_dir = Path(source_file).resolve().parent
-    path = str(plugin_dir)
-    try:
-        if _is_bundled(plugin_dir):
-            return "bundled", path
-        user_dir = _get_user_plugins_dir()
-        if user_dir:
-            user_root = Path(user_dir).resolve()
-            if plugin_dir == user_root or user_root in plugin_dir.parents:
-                return "user", path
-        project_root = (Path.cwd() / ".hermes" / "plugins").resolve()
-        if plugin_dir == project_root or project_root in plugin_dir.parents:
-            return "project", path
-    except OSError:
-        return "unknown", path
-    return "unknown", path
+@contextlib.contextmanager
+def provider_registration_scope(name: str) -> Iterator[Callable[[], None]]:
+    """Yield a ``release()`` that disposes every registration provider ``name``'s loads made on the
+    active profile's plugin manager since the block began: hooks, tools, middleware and the rest
+    ``_ProviderCollector`` forwards (all in the manager's ownership ledger). For a one-shot load
+    whose plugin host is about to stop, so nothing is left proxying into a dead host; the
+    provider's next real load registers them again. A real load of the same provider on the same
+    profile inside the block loses its registrations too, until it next loads (they would
+    proxy into the stopped host anyway, unless it loaded in-process)."""
+    from hermes_cli.plugins import get_plugin_manager
+
+    provider_dir = find_provider_dir(name)
+    key = provider_dir.name if provider_dir else name  # the collector's key (_load_provider_from_dir)
+    manager = get_plugin_manager()
+    with manager._discovery_lock:
+        before = {id(r) for r in manager._ownership_ledger.get(key, ())}
+
+    def release() -> None:
+        with manager._discovery_lock:
+            made = [r for r in manager._ownership_ledger.get(key, ()) if id(r) not in before]
+            manager._dispose_registrations(made)
+
+    yield release
 
 
 def _get_active_memory_provider() -> Optional[str]:
@@ -532,6 +528,31 @@ def _get_active_memory_provider() -> Optional[str]:
         return cfg_get(config, "memory", "provider") or None
     except Exception:
         return None
+
+
+def active_memory_provider_commands() -> set[str]:
+    """The ``hermes <name>`` command the active memory provider registers, as a set: empty when none is
+    selected or it ships no ``cli.py`` (the file :func:`discover_plugin_cli_commands` imports).
+    Never raises (config read errors count as no provider)."""
+    name = _get_active_memory_provider()
+    provider_dir = find_provider_dir(name) if name else None
+    return {name} if provider_dir is not None and (provider_dir / "cli.py").exists() else set()
+
+
+def parked_provider_notice(name: str) -> Optional[str]:
+    """The user-facing reason a configured provider is not loading because ``plugins.disabled`` parks
+    it, naming the update that did so when there was one; None when it is not parked."""
+    provider_dir = find_provider_dir(name)
+    if provider_dir is None or not _explicitly_disabled(name, provider_dir):
+        return None
+    from hermes_cli.config import load_config
+    from pm.plugins_state import RECORD
+    record = cfg_get(load_config(), "plugins", RECORD)
+    recorded = record.get(name) if isinstance(record, dict) else None
+    why = (f" An update turned it off ({recorded.get('reason')}) and a later update retries it."
+           if isinstance(recorded, dict) and recorded.get("reason") else "")
+    return (f"⚠ Memory provider '{name}' is turned off: plugins.disabled lists it, so external memory is off "
+            f"(built-in memory still works).{why} Turn it back on with `hermes plugins enable {name}`.")
 
 
 def _explicitly_disabled(name: str, provider_dir: Path) -> bool:
@@ -546,14 +567,9 @@ def _explicitly_disabled(name: str, provider_dir: Path) -> bool:
         return False
     if not isinstance(disabled, list):
         return False
-    names = {name, provider_dir.name}
-    try:
-        import hermes_yaml as yaml
-        with open(provider_dir / "plugin.yaml", encoding="utf-8-sig") as f:
-            names.add(str((yaml.safe_load(f) or {}).get("name") or ""))
-    except Exception:
-        pass
-    return bool(names & {v for v in disabled if isinstance(v, str)})
+    from pm.plugins_state import plugin_spellings
+
+    return bool(plugin_spellings(provider_dir, name) & {v for v in disabled if isinstance(v, str)})
 
 
 def _prune_inactive_memory_provider_skills(active_provider: Optional[str] = None) -> None:

@@ -8,8 +8,11 @@ from datetime import timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(PROJECT_ROOT))
+from hermes_cli._startup_fast import project_root_str
+
+PROJECT_ROOT = Path(project_root_str())
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from hermes_cli.colors import Colors, color
 
@@ -246,6 +249,8 @@ def _job_rows(job: dict[str, Any]) -> list[tuple[str, str]]:
         ("Changed", mon_state.get("last_changed_at") if monitor_source else ""),
         ("Mode", color("no-agent", Colors.DIM) + " (script stdout delivered directly)"
          if job.get("no_agent") else ""),
+        ("Timezone", job.get("timezone")),
+        ("Grace", f"{job['grace_minutes']} min" if job.get("grace_minutes") is not None else ""),
         ("Workdir", job.get("workdir")),
         ("Python", job.get("interpreter")),
         ("Last run", f"{job.get('last_run_at', '?')}  {_last_run_display(job)}"
@@ -311,13 +316,16 @@ def _job_warnings(job: dict[str, Any]) -> list[str]:
 
 
 def cron_tick():
-    """Run due jobs once and exit."""
+    """Run due jobs once and exit (external-scheduler mode: a system crontab calls this).
+
+    No gateway runs here by definition, and none is started: agent jobs are skipped with a logged
+    reason until the gateway is up (headless surfaces refuse rather than spawn)."""
     from cron.scheduler import CronTickYielded, tick
     from hermes_cli.observability.shared_metrics_process import begin_process
 
     begin_process("cron")
     try:
-        tick(verbose=True)
+        tick(verbose=True, headless=True)
     except CronTickYielded as exc:
         # Inert for a one-shot CLI (no boot fingerprint); report cleanly rather than traceback.
         print(color(f"✗ {exc}", Colors.YELLOW))
@@ -729,6 +737,20 @@ def _cron_doctor_issues_for_job(job: dict[str, Any]) -> list[str]:
     workdir = str(job.get("workdir") or "").strip()
     if workdir and not Path(workdir).expanduser().exists():
         issues.append(f"workdir not found: {workdir}")
+    if job.get("timezone"):
+        from cron.jobs_time import zone_for_job
+        if zone_for_job(job) is None:
+            issues.append(f"timezone {job['timezone']!r} is not a valid IANA zone; "
+                          "the job falls back to the profile timezone")
+    if job.get("grace_minutes") is not None:
+        from cron.jobs_time import normalize_grace_minutes
+        try:
+            normalize_grace_minutes(job.get("grace_minutes"))
+        except ValueError as exc:
+            issues.append(f"grace_minutes is unusable ({exc})")
+        else:
+            if (job.get("schedule") or {}).get("kind") != "cron":
+                issues.append("grace_minutes has no effect on a non-cron schedule")
     return issues
 
 
@@ -759,8 +781,8 @@ _JOB_ARG_FIELDS = (("name", "name"), ("deliver", "deliver"), ("failure_deliver",
                    ("model", "model"), ("provider", "model_provider"), ("pinned", "pinned"),
                    ("monitor_script", "monitor_script"), ("monitor_url", "monitor_url"),
                    ("continuity", "continuity"), ("reasoning_effort", "reasoning_effort"),
-                   ("interpreter", "interpreter"),
-                   ("pin_inference", "pin"))
+                   ("interpreter", "interpreter"), ("timezone", "timezone"),
+                   ("grace_minutes", "grace_minutes"), ("catch_up", "catch_up"))
 
 
 def _job_api_kwargs(args) -> dict[str, Any]:
@@ -774,6 +796,7 @@ _JOB_DETAIL_LINES = (
     ("monitor_url", "  Monitor: {} (agent runs only on output change)"),
     ("no_agent", "  Mode: no-agent (script stdout delivered directly)"),
     ("continuity", "  Continuity: on (each run sees the previous run's output)"),
+    ("timezone", "  Timezone: {} (schedule runs on this zone's wall clock)"),
     ("workdir", "  Workdir: {}"),
     ("interpreter", "  Python: {}"))
 
@@ -908,6 +931,10 @@ def _job_action(action: str, job_id: str, success_verb: str) -> int:
         print(f"  Next run: {result['job']['next_run_at']}")
     if action == "run":
         print(f"  {_run_outcome(result.get('job', {}))}")
+        if (job.get('executed') and job.get('execution_success') is False
+                and job.get('last_status') != 'cancelled'
+                and not job.get('delegation_id') and job.get('execution_mode') != 'background'):
+            return 1
     return 0
 
 
@@ -922,6 +949,8 @@ def _run_outcome(job: dict[str, Any]) -> str:
     if job.get("execution_mode") == "background":
         return "Running in background."
     if job.get("executed"):
+        if not job.get("execution_success") and job.get("last_status") == "cancelled":
+            return "Ran now: cancelled."
         return f"Ran now: {'succeeded' if job.get('execution_success') else 'failed'}."
     return job.get("execution_skipped") or "It will run on the next scheduler tick."
 
@@ -995,6 +1024,24 @@ def cron_notepad(args) -> int:
         return 1
 
 
+def cron_cancel(args) -> int:
+    """Stop a job's live run. The schedule is untouched — the next fire still happens."""
+    result = _cron_api(action="cancel", job_id=args.job_id,
+                       reason=getattr(args, "reason", None))
+    if not result.get("success"):
+        print(color(f"Failed to cancel run: {result.get('error', 'unknown error')}", Colors.RED))
+        return 1
+    job = result.get("job") or {}
+    label = f"{job.get('name', args.job_id)} ({args.job_id})"
+    if not result.get("cancelled"):
+        print(color(f"Nothing to cancel for {label}", Colors.YELLOW))
+        return 0
+    print(color(f"Cancel requested for {label}", Colors.GREEN))
+    print(f"  Execution: {result['execution_id']} (pid {result.get('pid')})")
+    print(f"  {result.get('detail', '')}")
+    return 0
+
+
 # Late-bound lambdas keep module-level monkeypatching working; list/status/runs return None -> 0.
 _CRON_SUBCOMMANDS = {
     "list": lambda a: cron_list(getattr(a, "all", False)) or 0,
@@ -1009,69 +1056,12 @@ _CRON_SUBCOMMANDS = {
     "pause": lambda a: _job_action("pause", a.job_id, "Paused"),
     "resume": lambda a: cron_resume(a),
     "run": lambda a: _job_action("run", a.job_id, "Triggered"),
+    "cancel": lambda a: cron_cancel(a),
     "remove": lambda a: _job_action("remove", a.job_id, "Removed"),
-    "repin": lambda a: cron_repin(a),
-    "resnap": lambda a: _cron_resnap(a)}
+}
 _CRON_SUBCOMMANDS["history"] = _CRON_SUBCOMMANDS["runs"]
 _CRON_SUBCOMMANDS["add"] = _CRON_SUBCOMMANDS["create"]
 _CRON_SUBCOMMANDS["rm"] = _CRON_SUBCOMMANDS["delete"] = _CRON_SUBCOMMANDS["remove"]
-
-
-def cron_repin(args) -> int:
-    """Handle `hermes cron repin [job_id] [--all] [--drifted] [--pin]`."""
-    from cron.jobs import AmbiguousJobReference, repin_jobs, resolve_job_ref
-
-    job_id = getattr(args, "job_id", None)
-    all_jobs = bool(getattr(args, "all", False))
-    drifted_only = bool(getattr(args, "drifted", False))
-    pin = bool(getattr(args, "pin", False))
-
-    if job_id and all_jobs:
-        print(color("Cannot specify both a job ID and --all.", Colors.RED))
-        return 1
-
-    target_ids = None
-    if job_id:
-        try:
-            resolved = resolve_job_ref(job_id)
-            if not resolved:
-                print(color(f"Job not found: {job_id}", Colors.RED))
-                return 1
-            target_ids = [resolved["id"]]
-        except AmbiguousJobReference as exc:
-            print(color(str(exc), Colors.RED))
-            return 1
-
-    # If neither --all nor specific job_id is passed, default to drifted jobs
-    if not target_ids and not all_jobs:
-        drifted_only = True
-
-    updated = repin_jobs(
-        job_ids=target_ids,
-        drifted_only=drifted_only,
-        pin_explicitly=pin,
-    )
-    if not updated:
-        print(color("No matching cron jobs to re-pin.", Colors.YELLOW))
-        return 0
-
-    verb = "Pinned" if pin else "Re-pinned baseline for"
-    print(color(f"{verb} {len(updated)} job{'s' if len(updated) != 1 else ''}:", Colors.GREEN))
-    for job in updated:
-        target_info = []
-        if pin:
-            if job.get("provider"):
-                target_info.append(f"provider={job['provider']}")
-            if job.get("model"):
-                target_info.append(f"model={job['model']}")
-        else:
-            if job.get("provider_snapshot"):
-                target_info.append(f"provider_snapshot={job['provider_snapshot']}")
-            if job.get("model_snapshot"):
-                target_info.append(f"model_snapshot={job['model_snapshot']}")
-        detail = f" ({', '.join(target_info)})" if target_info else ""
-        print(f"  • {job['id']}: {job.get('name', 'unnamed')}{detail}")
-    return 0
 
 
 def cron_command(args):
@@ -1081,35 +1071,5 @@ def cron_command(args):
     if handler is not None:
         return handler(args)
     print(f"Unknown cron command: {subcmd}\n"
-          "Usage: hermes cron [list|create|edit|pause|resume|run|remove|repin|resnap|status|runs|doctor|tick]")
+          "Usage: hermes cron [list|create|edit|pause|resume|run|cancel|remove|status|runs|doctor|tick]")
     sys.exit(1)
-
-
-def _cron_resnap(args) -> int:
-    """Handle `hermes cron resnap [job_id] [--all]`."""
-    if bool(getattr(args, "all", False)):
-        result = _cron_api(action="resnap", all=True)
-        if not result.get("success"):
-            print(color(f"Failed to resnap: {result.get('error', 'unknown error')}", Colors.RED))
-            return 1
-        updated = result.get("updated_jobs", [])
-        print(color(f"Resnapped {len(updated)} unpinned job(s) to the current global resolution.", Colors.GREEN))
-        for job in updated:
-            print(f"  • {job.get('name', job.get('job_id'))} ({job.get('job_id')})")
-        if not updated:
-            print("  (no unpinned agent jobs found — nothing to refresh)")
-        return 0
-
-    job_id = getattr(args, "job_id", None)
-    if not job_id:
-        print(color("resnap requires either a <job_id> or --all.", Colors.RED))
-        print("Usage: hermes cron resnap <job_id> | hermes cron resnap --all")
-        return 1
-    result = _cron_api(action="resnap", job_id=job_id)
-    if not result.get("success"):
-        print(color(f"Failed to resnap job: {result.get('error', 'unknown error')}", Colors.RED))
-        return 1
-    job = result.get("job", {})
-    print(color(f"Resnapped job: {job.get('name', job_id)} ({job.get('job_id', job_id)})", Colors.GREEN))
-    print("  Adopted the current global inference resolution; the job remains unpinned and will track future global changes.")
-    return 0

@@ -358,187 +358,46 @@ def _invalid(message: str) -> tuple[str, str]:
     return "rejected", tool_error(message, success=False)
 
 
-def memory_tool(
-    action: str = None,
-    target: str = "memory",
-    content: str = None,
-    old_text: str = None,
-    new_text: str = None,
-    source_class: str = DEFAULT_SOURCE_CLASS,
-    trust_tier: str = DEFAULT_TRUST_TIER,
-    source_filter: Optional[object] = None,
-    min_trust: Optional[str] = None,
-    include_superseded: bool = False,
-    operations: Optional[list[dict[str, Any]]] = None,
-    target_size: Optional[int] = None,
-    prefer: str = "longest",
-    memory_char_limit: Optional[int] = None,
-    store: Optional[MemoryStore] = None,
-) -> str:
-    """Single entry point for the memory tool. Dispatches to MemoryStore methods."""
-    if store is None:
-        return tool_error(
-            "Memory is not available. It may be disabled in config or this environment.",
-            success=False,
-        )
-
-    token = FAILURE_CLASS.set("other")
-    try:
-        outcome, result = _memory_tool(
-            action=action,
-            target=target,
-            content=content,
-            old_text=old_text,
-            new_text=new_text,
-            source_class=source_class,
-            trust_tier=trust_tier,
-            source_filter=source_filter,
-            min_trust=min_trust,
-            include_superseded=include_superseded,
-            operations=operations,
-            target_size=target_size,
-            prefer=prefer,
-            memory_char_limit=memory_char_limit,
-            store=store,
-        )
-        failure_class = "none" if outcome == "success" else FAILURE_CLASS.get()
-    finally:
-        FAILURE_CLASS.reset(token)
-
-    try:
-        from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
-        record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
-    except Exception:
-        pass
-
-    return result
-
-
-def _handle_operations_batch(
-    store: MemoryStore,
-    target: str,
-    operations: Any,
-    source_class: str,
-    trust_tier: str,
-    memory_char_limit: Optional[int],
-) -> tuple[str, str]:
-    if not isinstance(operations, list):
-        return _invalid("operations must be a list of {action, content?, old_text?} objects.")
-    if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
-        return _invalid(_REPLACE_REMOVED)
-    gate_result = _apply_write_gate(
-        store, "batch", target, None, None, operations,
-        source_class=source_class, trust_tier=trust_tier,
-    )
-    if gate_result is not None:
-        return "rejected", gate_result
-    try:
-        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
-    except Exception as exc:  # health: allow BLE001 -- deliberate boundary returning formatted memory error
-        return "failed", _memory_enriched_error(exc, "batch")
-    return _applied(result)
-
-
-def _memory_tool(
-    action: Optional[str],
-    target: Optional[str],
-    content: Optional[str],
-    old_text: Optional[str],
-    new_text: Optional[str],
-    source_class: str,
-    trust_tier: str,
-    source_filter: Optional[object],
-    min_trust: Optional[str],
-    include_superseded: bool,
-    operations: Optional[list[dict[str, Any]]],
-    target_size: Optional[int],
-    prefer: str,
-    memory_char_limit: Optional[int],
-    store: MemoryStore,
-) -> tuple[str, str]:
-    """Internal memory dispatch returning (outcome, result_json)."""
-    # Accept new_text as alias for content
+def _memory_tool(action, target, content, old_text, new_text, operations, store) -> tuple[str, str]:
+    """``(outcome, result_json)``: ``rejected`` when refused or held before touching the store."""
+    # An omitted optional string can arrive as "" (#90468): let the new_text alias fill it.
     if not content and new_text:
         content = new_text
-
-    if target is None:
-        target = "memory"
-
     target_error = _memory_target_error(store, target, operations)
     if target_error is not None:
         return "rejected", json.dumps(target_error)
-
-    bg_gate = _background_delete_gate(store, action, operations, target=target, content=content, old_text=old_text)
-    if bg_gate is not None:
-        return "rejected", bg_gate
-
-    if action == "search":
-        rows = store.search(
-            target,
-            source_filter=source_filter,
-            min_trust=min_trust,
-            include_superseded=bool(include_superseded),
-        )
-        return "success", json.dumps(
-            {
-                "success": True,
-                "target": target,
-                "results": rows,
-                "result_count": len(rows),
-            },
-            ensure_ascii=False,
-        )
-
-    if action == "compact":
-        prefer_param = prefer if prefer is not None else "longest"
-        try:
-            target_size_int = int(target_size) if target_size is not None else None
-        except (TypeError, ValueError):
-            return _invalid("target_size must be an integer number of characters.")
-        result = store.compact(target, target_size=target_size_int, prefer=prefer_param)
-        return _applied(result)
-
     if operations:
-        return _handle_operations_batch(
-            store, target, operations, source_class, trust_tier, memory_char_limit
-        )
-
-    if not action and not operations:
-        return _invalid(
-            "Missing required parameter: provide 'action' (add/patch/remove) "
-            "or 'operations' (batch list). Got neither."
-        )
-
-    if action == "replace":
-        return _invalid(_REPLACE_REMOVED)
-
-    if action in ("add", "patch", "remove"):
-        invalid = _validate_single_op(store, action, target, content, old_text)
-        if invalid is not None:
-            return "rejected", invalid
-        gate_result = _apply_write_gate(
-            store, action, target, content, old_text,
-            source_class=source_class, trust_tier=trust_tier,
-        )
+        if not isinstance(operations, list):
+            return _invalid("operations must be a list of {action, content?, old_text?} objects.")
+        if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
+            return _invalid(_REPLACE_REMOVED)
+        denied = _background_delete_gate(store, action, operations, target)
+        if denied is not None:
+            return "rejected", denied
+        # Approval gate: stages (background/gateway) or prompts inline (CLI); off by default.
+        gate_result = _apply_write_gate(store, "batch", target, None, None, operations)
         if gate_result is not None:
             return "rejected", gate_result
-        try:
-            result = _STORE_ACTIONS[action][0](
-                store, target, content, old_text,
-                source_class=source_class, trust_tier=trust_tier,
-            )
-        except Exception as exc:
-            return "failed", _memory_enriched_error(exc, action)
-        return _applied(result)
-
-    if action == "supersede":
-        try:
-            result = store.supersede(target, old_text)
-        except Exception as exc:
-            return "failed", _memory_enriched_error(exc, "supersede")
-        return _applied(result)
-
-    return _invalid(f"Unknown action '{action}'. Use: add, patch, replace, remove, search, compact, supersede")
+        return _applied(store.apply_batch(target, operations))
+    # Reject calls with neither operations[] nor the legacy top-level action.
+    # Without this guard the dispatch falls through to the generic
+    # "Unknown action 'None'" error, which gives the model no signal about
+    # *why* the call was malformed and can trigger repeated retries. (#64291)
+    if not action and not operations:
+        return _invalid(
+            "Missing required parameter: 'operations', a list of {action: add/patch/remove, "
+            "content?, old_text?} changes; a single change is a one-item list."
+        )
+    if action == "replace":
+        return _invalid(_REPLACE_REMOVED)
+    if action not in _STORE_ACTIONS:
+        return _invalid(f"Unknown action '{action}'. Use: add, patch, remove")
+    invalid = (_validate_single_op(store, action, target, content, old_text)
+               or _background_delete_gate(store, action, None, target, content, old_text)
+               or _apply_write_gate(store, action, target, content, old_text))
+    if invalid is not None:
+        return "rejected", invalid
+    return _applied(_STORE_ACTIONS[action][0](store, target, content, old_text))
 
 
 def get_builtin_memory_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -649,121 +508,60 @@ MEMORY_SCHEMA = {
         "checked only on the FINAL result — so a single call can remove/patch stale entries "
         "to free room AND add new ones, even when an add alone would overflow. The response "
         "reports current/limit chars and confirms completion; one batch call finishes the "
-        "update, so don't repeat it. Use the bare action/content/old_text fields only for a "
-        "single lone change. Use action='search' to read entries back (optionally filtered "
-        "by provenance via source_filter / min_trust).\n\n"
-        "WHEN: save proactively when the user states a preference, correction, or personal "
-        "detail, or you learn a stable fact about their environment, conventions, or workflow. "
-        "Priority: user preferences & corrections > environment facts > procedures. The best "
-        "memory stops the user repeating themselves.\n\n"
-        "IF FULL: an add is auto-accepted by evicting the OLDEST entry to make room "
-        "(the evicted text is listed under `evicted` in the response, so nothing is lost silently). "
-        "Only if the new entry alone exceeds the whole budget, or the safety floor is reached, is the add rejected with the current entries shown — then reissue as ONE batch that removes or shortens enough stale entries and adds the new one together. Or call action='compact' first to shorten entries so the batch fits.\n\n"
+        "update, so don't repeat it.\n\n"
+        "WHEN: only for facts that apply to EVERY session regardless of task: who the user "
+        "is, stable environment facts, standing conventions with no task home. Anything "
+        "learned while doing a task (procedures, pitfalls, and the user's preferences and "
+        "corrections for that kind of work) belongs in the task's skill via skill_manage, "
+        "where it loads only when relevant; memory is injected into every turn and must "
+        "stay small.\n\n"
+        "IF FULL: an add is rejected with the current entries shown. Reissue as ONE batch that "
+        "removes or shortens enough stale entries and adds the new one together.\n\n"
         "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
         "notes (environment, conventions, tool quirks, lessons).\n\n"
-        "PROVENANCE (optional, on add/replace): tag where a fact came from. source_class = "
-        "user_input (the user told you), external_tool (a tool/API returned it), agent_authored "
-        "(YOUR own inference — treat as a guess), or system. trust_tier rates reliability. "
-        "Tagging agent_authored guesses keeps them distinguishable from facts the user "
-        "actually stated.\n\n"
         "SKIP: trivial/obvious info, easily re-discovered facts, raw data dumps, task progress, "
         "completed-work logs, temporary TODO state (use session_search for those). Reusable "
         "procedures belong in a skill, not memory."
     ),
+    # Each field is advertised once, inside operations[]. The handler still ACCEPTS the
+    # top-level single-op shape (action/content/old_text) and the new_text alias: models
+    # drift and older transcripts replay them.
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["add", "patch", "replace", "remove", "search", "compact", "supersede"],
-                "description": "The action to perform (single op: 'add', 'patch', 'replace', 'remove', 'search' to read entries, 'compact' to shorten entries to fit, or 'supersede' to retire a stale entry). Omit when using the 'operations' batch array.",
-            },
             "target": {
                 "type": "string",
                 "enum": ["memory", "user"],
-                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile.",
-            },
-            "content": {
-                "type": "string",
-                "description": "Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', the text that replaces old_text; the rest of the entry is kept. Alias: 'new_text'."
-            },
-            "old_text": {
-                "type": "string",
-                "description": "REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces exactly this span (it must occur once in the entry); 'remove' deletes the whole entry. Omit for 'add'."
-            },
-            "new_text": {
-                "type": "string",
-                "description": "Alias for 'content'. If both are set, 'content' wins."
+                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile."
             },
             "operations": {
                 "type": "array",
                 "description": (
-                    "Batch shape: a list of operations applied atomically in one call "
-                    "against the final char budget. Preferred when making multiple changes "
-                    "or consolidating to make room. Each item is {action, content?, old_text?}."
+                    "Changes applied atomically in one call against the final char budget; "
+                    "a single change is a one-item list."
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "enum": ["add", "patch", "remove"]},
-                        "content": {"type": "string", "description": "Required for add and patch, as 'content' above."},
-                        "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
-                        "old_text": {"type": "string", "description": "As 'old_text' above."},
+                        "content": {
+                            "type": "string",
+                            "description": ("Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', "
+                                            "the text that replaces old_text; the rest of the entry is kept."),
+                        },
+                        "old_text": {
+                            "type": "string",
+                            "description": ("REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces "
+                                            "exactly this span (it must occur once in the entry); 'remove' deletes the "
+                                            "whole entry. Omit for 'add'."),
+                        },
                     },
                     "required": ["action"],
                     "additionalProperties": False,
                 },
             },
-            "target_size": {
-                "type": "integer",
-                "description": "Optional for 'compact': target character count (defaults to the store limit).",
-            },
-            "prefer": {
-                "type": "string",
-                "enum": ["longest", "oldest"],
-                "description": "Optional for 'compact': which entries to trim first (default: longest).",
-            },
-            "source_class": {
-                "type": "string",
-                "enum": list(SOURCE_CLASSES),
-                "description": (
-                    "Optional provenance for 'add'/'replace': who produced this fact. "
-                    "Defaults to 'unknown'. Use 'agent_authored' for your own guesses."
-                ),
-            },
-            "trust_tier": {
-                "type": "string",
-                "enum": list(TRUST_TIERS),
-                "description": (
-                    "Optional provenance for 'add'/'replace': how reliable this fact is. "
-                    "Defaults to 'unknown'."
-                ),
-            },
-            "source_filter": {
-                "type": "array",
-                "items": {"type": "string", "enum": list(SOURCE_CLASSES)},
-                "description": "Optional for 'search': keep only entries with these source classes.",
-            },
-            "min_trust": {
-                "type": "string",
-                "enum": list(TRUST_TIERS),
-                "description": "Optional for 'search': keep only entries at or above this trust tier.",
-            },
-            "include_superseded": {
-                "type": "boolean",
-                "description": "Optional for 'search': also return superseded (retired) entries, each with a superseded_at timestamp. Default false.",
-            },
-            "memory_char_limit": {
-                "type": "integer",
-                "description": (
-                    "Optional per-batch override for the 'memory' target char limit, "
-                    "only honoured when config 'memory.allow_batch_memory_char_limit_override' "
-                    "is True. Ignored for 'user' target. The system-prompt snapshot always "
-                    "uses the configured limit (issue #517)."
-                ),
-            },
         },
-        "required": ["target"],
+        "required": ["target", "operations"],
     },
 }
 

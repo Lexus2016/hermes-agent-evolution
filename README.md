@@ -1,11 +1,21 @@
-# Hermes Evolution 🧬
+<p align="center">
+  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
+</p>
 
-> A self-improving version of **Hermes Agent** — it researches improvements,
-> proposes them, and updates itself daily. You keep using Hermes as usual; it
-> gets better on its own.
+# Hermes Agent ☤
+<p align="center">
+  <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> | <a href="https://hermes-agent.nousresearch.com/">Hermes Desktop</a>
+</p>
+<p align="center">
+  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
+  <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
+  <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Based on Hermes Agent](https://img.shields.io/badge/based%20on-Hermes%20Agent-blue.svg)](https://github.com/nousresearch/hermes-agent)
 **The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
 
 Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
@@ -15,89 +25,49 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 <tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
 <tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
 <tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Seven terminal backends — local, Docker, SSH, Singularity, Modal, Daytona, and Vercel Sandbox. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
+<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. In Desktop, choose their provider, model, and limits under Settings → Model → Subagents, then Apply the complete route. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
+<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six built-in terminal backends — local, Docker, SSH, Modal, Daytona, and Vercel Sandbox — plus plugin backends such as Singularity/Apptainer. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
 <tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
 </table>
 
 ---
 
-## ⭐ Install or upgrade — one command
+## Quick Install
 
-Whether you're **starting from scratch** or **already running Hermes**, paste
-**one line** into your terminal. If Hermes isn't installed yet, it installs our
-version fresh; if it is, it switches your existing Hermes onto Evolution
-(your chats, memory, and settings are kept):
+### Linux, macOS, WSL2
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 ```
 
-That's it. The script does everything for you, safely:
-- backs up your data (nothing is lost),
-- switches your Hermes to this version,
-- turns on the evolution features,
-- sets up **daily auto-updates** so it keeps improving on its own.
+### Windows (native, PowerShell)
 
-You can re-run it any time — it won't break anything. Your existing chats,
-memory, and settings stay exactly as they were.
+> **Heads up:** Native Windows runs Hermes without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file issues](https://github.com/NousResearch/hermes-agent/issues).
 
-> Don't want unattended daily updates? Add `--no-star` and/or `--no-auto-update`
-> when you run it (from a clone): `bash upgrade.sh --no-auto-update`.
+Run this in PowerShell:
 
-### Windows & Termux
+```powershell
+iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+```
 
-> **Windows:** Native Windows is supported via `scripts/install.ps1`; see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
+The source installer delegates Python 3.14, Node.js, npm, pnpm, ripgrep, FFmpeg,
+and Python dependencies to PM. If Git is absent, it stages the verified Git
+for Windows archive in Hermes' tool store. It does not replace your system Git.
+See [installation methods](https://hermes-agent.nousresearch.com/docs/getting-started/installation)
+for the separate MSIX/App Installer package and its update ownership.
+
+> **Android / Termux:** A signed APT repository is available for aarch64 devices, with a `stable` channel (tagged releases) and a prerelease `canary` channel. The package includes Python, Node.js, and the TUI. Use the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux), not the desktop/server installer script.
 >
-> **Android / Termux:** Use the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux).
+> **Windows:** Native Windows is fully supported — the PowerShell one-liner above installs everything. If you'd rather use WSL2, the Linux command works there too. Native Windows install lives under `%LOCALAPPDATA%\hermes`; WSL2 installs under `~/.hermes` as on Linux.
+
+After installation:
+
+```bash
+source ~/.bashrc    # reload shell (or: source ~/.zshrc)
+hermes              # start chatting!
+```
 
 ### Troubleshooting
-
-#### Running Hermes in Docker?
-
-The container image is built **without** a git working tree (`.git` is excluded
-from the build context), so there are no remotes to repoint from the inside —
-the same reason `hermes update` refuses to run there. You have two options.
-
-**A. Rebuild the image on the host** — durable, survives container recreate:
-
-```bash
-git clone https://github.com/Lexus2016/hermes-agent-evolution.git
-cd hermes-agent-evolution
-docker build -t hermes-agent-evolution:latest .
-
-# point your compose file / run command at that image, then:
-docker compose up -d --force-recreate
-```
-
-**B. Upgrade the running container in place** — when you only have a shell
-inside it (NAS or panel deployments, no host docker, no build daemon):
-
-```bash
-docker exec -u 0 -it <container> bash
-curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash -s -- --in-container
-docker restart <container>   # or let the script bounce the s6 service
-```
-
-This works because the image installs Hermes as an **editable** checkout
-(`uv pip install -e .`), so the virtualenv imports straight out of
-`/opt/hermes` — replacing the source tree *is* the upgrade. The script turns
-`/opt/hermes` into a real git checkout of this fork; everything the repo does
-not track (`.venv/`, `node_modules/`, the `bin/hermes` shim,
-`hermes_cli/web_dist/`) is left untouched.
-
-Two caveats for option B:
-
-- The change lives in the container's **writable layer**. `docker restart`
-  keeps it; recreating the container from the image (`compose up
-  --force-recreate`, an image pull) reverts to stock Hermes — which is also
-  your rollback. Re-run the command to reapply.
-- There is **no daily self-update** inside the container (the image ships no
-  cron). Re-run the same command whenever you want the latest commit; after
-  the first run it is a fast `git fetch`.
-
-In both cases your config, chats and memory live on the `$HERMES_HOME` volume
-(`/opt/data`) and are never touched.
 
 #### Windows Defender or antivirus flags `uv.exe` as malware
 
@@ -134,126 +104,121 @@ For more context, see the upstream Astral reports: [astral-sh/uv#13553](https://
 
 ---
 
-## 🔑 Set up a GitHub token
+## Getting Started
 
-The agent needs a GitHub token to work with GitHub. There are **two cases** —
-pick the one that's you. (~2 minutes, no coding.)
+```bash
+hermes              # Interactive CLI — start a conversation
+hermes model        # Choose your LLM provider and model
+hermes tools        # Configure which tools are enabled
+hermes config set   # Set individual config values
+hermes config get   # Print individual config values
+hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
+hermes setup        # Run the full setup wizard (configures everything at once)
+hermes update       # Update to the latest version
+hermes doctor       # Diagnose any issues
+```
 
-### 👤 Regular user — let the agent open improvement *issues*
-
-The agent opens issues on the **shared Hermes Evolution repo**. That repo isn't
-yours, so a fine-grained token can't target it — use a **classic** token with
-the `public_repo` scope:
-
-1. Open **[github.com/settings/tokens/new](https://github.com/settings/tokens/new)**
-   — this is *Personal access token (classic)*.
-2. **Note:** `hermes-evolution`. **Expiration:** 90 days (or longer).
-3. Tick **`public_repo`** (under **repo** → “Access public repositories”). That's
-   the only box you need — it lets the agent open issues/PRs on public repos.
-4. Click **Generate token** → **copy** it (starts with `ghp_…`; shown once).
-5. Give it to your agent:
-   ```bash
-   echo 'GITHUB_TOKEN=PASTE_YOUR_TOKEN_HERE' >> ~/.hermes/.env
-   ```
-
-Done — your Hermes can now research and open improvement issues.
-
-### 🛠️ Repo owner — full self-evolution (issues, PRs, commits, pushes, releases)
-
-If you **own** `hermes-agent-evolution`, the agent can also implement changes,
-open pull requests, push branches, and cut releases. You own the repo, so use a
-**fine-grained** token scoped to it:
-
-1. Open **[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)**
-   — this is the *Fine-grained token* page.
-2. **Token name:** `hermes-evolution-owner`. **Expiration:** 90 days (or longer).
-3. **Repository access:** *Only select repositories* → pick
-   **`hermes-agent-evolution`** (you can select it because it's yours).
-4. **Permissions → Repository permissions** — set to **Read and write**:
-   - **Contents** — commits, pushes, tags **and releases**
-   - **Issues**
-   - **Pull requests**
-5. Click **Generate token** → **copy** it (starts with `github_pat_…`; shown once).
-6. Give it to your agent. The owner runs the **full** cycle, which uses **two
-   roles**, so set **both** env vars (this is the part people miss):
-   ```bash
-   # PRIVATE role — analysis, implementation, push, PRs, releases (owner):
-   echo 'GITHUB_PRIVATE_TOKEN=PASTE_OWNER_TOKEN_HERE' >> ~/.hermes/.env
-   # PUBLIC role — research + opening issues reads GITHUB_TOKEN.
-   # Simplest: reuse the SAME owner token here too.
-   echo 'GITHUB_TOKEN=PASTE_OWNER_TOKEN_HERE' >> ~/.hermes/.env
-   ```
-   > **Why both?** The agent forces the right token per role: issues/research use
-   > `GITHUB_TOKEN`, while analysis/implementation use `GITHUB_PRIVATE_TOKEN`. If
-   > only one is set, half the cycle silently does nothing. Reusing the same owner
-   > token in both is fine. For a clean *"proposals come from a separate account"*
-   > split, put a **second** account's classic `public_repo` token in
-   > `GITHUB_TOKEN` instead (see the *Regular user* section above) — but never swap
-   > the two: `GITHUB_TOKEN` must be the proposer, `GITHUB_PRIVATE_TOKEN` the owner.
-
-> Keep tokens private — treat them like passwords. Never share them or paste them
-> into a chat. If one leaks, delete it on GitHub and create a new one.
+📖 **[Full documentation →](https://hermes-agent.nousresearch.com/docs/)**
 
 ---
 
-## 🧬 What you get
+## Skip the API-key collection — Nous Portal
 
-- **Daily research** — scans other AI agents, papers, and trends for ideas.
-- **Introspection** — reviews its own past sessions with you to find what
-  blocked real tasks, and proposes fixes for *those* (not just shiny features).
-- **Proposals** — opens GitHub issues with concrete improvement suggestions.
-- **Self-update** — pulls the latest improvements automatically every day.
-- **Stays current** — periodically brings in useful changes from the original
-  Hermes Agent.
+Hermes works with whatever provider you want — that's not changing. But if you'd rather not collect five separate API keys for the model, web search, image generation, TTS, and a cloud browser, **[Nous Portal](https://portal.nousresearch.com)** covers all of them under one subscription:
 
-- **300+ models & Tool Gateway** — all upstream models, web search, image gen, TTS, cloud browser.
-- **Plus everything in Hermes Agent** — CLI, messaging gateway, TUI, Desktop app, skills, MCP, cron.
+- **300+ models** — pick any of them with `/model <name>`
+- **Tool Gateway** — web search, image generation (FAL), text-to-speech (OpenAI), cloud browser (Browser Use), all routed through your sub. No extra accounts.
 
----
+One command from a fresh install:
 
-## 🆕 Starting from scratch?
+```bash
+hermes setup --portal
+```
 
-No need to install the original Hermes first — the one command above installs
-**our fork directly** (you do NOT end up on the original and then migrate).
-It pulls Hermes Evolution, sets it up, and turns on the evolution features in
-one go.
+That logs you in via OAuth, sets Nous as your provider, and turns on the Tool Gateway. Check what's wired up any time with `hermes portal info`. Full details on the [Tool Gateway docs page](https://hermes-agent.nousresearch.com/docs/user-guide/features/tool-gateway).
 
-Windows works natively too — a PowerShell installer (`scripts/install.ps1`) is
-included; see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
+You can still bring your own keys per-tool whenever you want — the gateway is per-backend, not all-or-nothing.
 
 ---
 
-## 🛡️ Is it safe?
+## CLI vs Messaging Quick Reference
 
-Yes. The agent can **propose** changes but cannot silently rewrite itself:
-every change goes through a pull request with automated tests, and important
-parts require your approval before they're merged. Updates are backed up and
-roll back automatically if anything looks wrong.
+Hermes has two entry points: start the terminal UI with `hermes`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email. Once you're in a conversation, many slash commands are shared across both interfaces.
 
-Details: **[EVOLUTION_README.md](EVOLUTION_README.md)** ·
-**[SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md)**
+| Action                         | CLI                                           | Messaging platforms                                                              |
+| ------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
+| Start chatting                 | `hermes`                                      | Run `hermes gateway setup` + `hermes gateway start`, then send the bot a message |
+| Start fresh conversation       | `/new` or `/reset`                            | `/new` or `/reset`                                                               |
+| Change model                   | `/model [provider:model]`                     | `/model [provider:model]`                                                        |
+| Set a personality              | `/personality [name]`                         | `/personality [name]`                                                            |
+| Retry or undo the last turn    | `/retry`, `/undo`                             | `/retry`, `/undo`                                                                |
+| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]`                                        |
+| Browse skills                  | `/skills` or `/<skill-name>`                  | `/<skill-name>`                                                                  |
+| Interrupt current work         | `Ctrl+C` or send a new message                | `/stop` or send a new message                                                    |
+| Platform-specific status       | `/platforms`                                  | `/status`, `/sethome`                                                            |
 
----
-
-## 📖 Learn more
-
-| Document | What's inside |
-|----------|---------------|
-| **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)** | Install/upgrade in detail, Windows, manual steps |
-| **[EVOLUTION_README.md](EVOLUTION_README.md)** | How evolution works, modes, the safety gate |
-| **[SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md)** | Security policy |
-| **[AGENTS.md](AGENTS.md)** | Original Hermes Agent documentation |
+For the full command lists, see the [CLI guide](https://hermes-agent.nousresearch.com/docs/user-guide/cli) and the [Messaging Gateway guide](https://hermes-agent.nousresearch.com/docs/user-guide/messaging).
 
 ---
 
-## 📄 License & credits
+## Documentation
 
-MIT License (see `LICENSE`). Built on **[Hermes Agent](https://github.com/nousresearch/hermes-agent)**
-by [Nous Research](https://nousresearch.com/) — huge thanks to them and the
-Hermes community.
+All documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**:
 
-- **Repository:** [github.com/Lexus2016/hermes-agent-evolution](https://github.com/Lexus2016/hermes-agent-evolution)
-- **Upstream:** [github.com/nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent)
+| Section                                                                                             | What's Covered                                             |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| [Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart)                 | Install → setup → first conversation in 2 minutes          |
+| [CLI Usage](https://hermes-agent.nousresearch.com/docs/user-guide/cli)                              | Commands, keybindings, personalities, sessions             |
+| [Configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration)                | Config file, providers, models, all options                |
+| [Messaging Gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging)                | Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant |
+| [Security](https://hermes-agent.nousresearch.com/docs/user-guide/security)                          | Command approval, DM pairing, container isolation          |
+| [Tools & Toolsets](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools)            | 40+ tools, toolset system, terminal backends               |
+| [Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)              | Procedural memory, Skills Hub, creating skills             |
+| [Memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory)                     | Persistent memory, user profiles, best practices           |
+| [MCP Integration](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)               | Connect any MCP server for extended capabilities           |
+| [Cron Scheduling](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron)              | Scheduled tasks with platform delivery                     |
+| [Context Files](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files)       | Project context that shapes every conversation             |
+| [Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture)             | Project structure, agent loop, key classes                 |
+| [Contributing](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing)             | Development setup, PR process, code style                  |
+| [CLI Reference](https://hermes-agent.nousresearch.com/docs/reference/cli-commands)                  | All commands and flags                                     |
+| [Environment Variables](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) | Complete env var reference                                 |
+
+---
+
+## Migrating from OpenClaw or another agent
+
+If you're coming from OpenClaw, Claude Code, Codex CLI or Cursor, Hermes can import your settings, memories and skills (and, for OpenClaw, API keys when you ask for them).
+
+**During setup:** `hermes setup` asks whether to import from another agent, pre-selects the ones it finds (`~/.openclaw`, `~/.claude`, `~/.codex`, `~/.cursor`), installs the official `agent-importers` plugin and runs the import with a preview first.
+
+**Anytime after install:**
+
+```bash
+hermes plugins install agent-importers          # once per profile
+hermes import-agent openclaw                    # interactive migration (full preset)
+hermes import-agent openclaw --dry-run          # preview what would be migrated
+hermes import-agent openclaw --migrate-secrets  # also bring allowlisted API keys
+hermes import-agent claude-code                 # or codex / cursor
+```
+
+What gets imported from OpenClaw:
+
+- **SOUL.md** — persona file
+- **Memories** — MEMORY.md and USER.md entries
+- **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
+- **Command allowlist** — approval patterns
+- **Messaging settings** — platform configs, allowed users, working directory
+- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs), only with `--migrate-secrets`
+- **TTS assets** — workspace audio files
+- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
+
+`hermes claw migrate` still works as the older spelling. See the [OpenClaw migration guide](https://hermes-agent.nousresearch.com/docs/guides/migrate-from-openclaw) and [Import from Other Agents](https://hermes-agent.nousresearch.com/docs/user-guide/import-from-other-agents).
+
+---
+
+## Contributing
+
+We welcome contributions! See the [Contributing Guide](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) for development setup, code style, and PR process.
 
 Start with the [PM developer workflow](website/docs/reference/package-management.md#developer-workflow)
 for activation, daily use, dependency changes, and leaving the environment.
