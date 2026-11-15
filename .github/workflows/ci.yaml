@@ -71,7 +71,9 @@ jobs:
   detect:
     name: Detect affected areas
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    # 1 minute is enough for an ordinary PR; a substrate migration lists ~8.7k
+    # changed files, and the classifier needs the headroom to paginate them.
+    timeout-minutes: 10
     outputs:
       python: ${{ steps.gate-lanes.outputs.python }}
       python_prod: ${{ steps.gate-lanes.outputs.python_prod }}
