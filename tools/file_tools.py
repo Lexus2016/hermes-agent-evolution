@@ -11,42 +11,365 @@ import errno
 import json
 import logging
 import os
+import posixpath
 import re
 import stat
+import sys
 import threading
 import time
+import unicodedata
 from contextlib import ExitStack
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from agent.file_safety import get_nt_namespace_error, get_read_block_error
 from agent.tool_result_classification import GUARDRAIL_REFUSAL_KEY
-from tools.binary_extensions import has_binary_extension
+from tools.binary_extensions import (
+    has_binary_extension,
+    has_opaque_document_extension,
+    is_pdf_path,
+)
 from tools.skill_provenance import is_background_review
 from tools.file_operations import (
     ShellFileOperations, normalize_read_pagination, normalize_search_pagination)
 from tools.file_operations_common import DEFAULT_READ_LIMIT, count_conflict_blocks
 from tools import file_state
 from hermes_platform.host import facts
+from tools.path_validation import format_nearby_hint, suggest_nearby_paths
 from agent.redact import _is_secret_file_arg, redact_sensitive_text
 from tools.file_tools_paths import (
     _expand_tilde, _path_resolution_warning, _resolve_base_dir, _resolve_entry_for_task,
-    _resolve_path_for_task)
+    _resolve_path_for_task, _terminal_env_type_for_task, _uses_container_paths,
+    _normalize_without_host_deref, _sentinel_free_abs_cwd, _configured_terminal_cwd,
+    _registered_task_cwd_override, _authoritative_workspace_root, _host_text, _anchor)
 from tools.file_tools_write_guards import (
     _READ_DEDUP_STATUS_MESSAGE, _check_approval_required_write, _check_binary_document_write,
     _check_cross_profile_path, _check_protected_instruction_write, _check_sensitive_path,
-    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal)
+    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal,
+    write_failure_reason)
 from tools.file_tools_read_tracking import (
     _bump_consecutive, _cap_read_tracker_data, _carry_full_write_baselines, _check_file_staleness,
     _check_not_found_cache, _known_full_content_sha256,
     _file_metadata, _file_version,
     _mark_full_write_baseline, _mark_verification_stale, _note_read_coverage, _patch_failure_lock,
     _patch_failure_tracker, _read_tracker, _read_tracker_lock, _record_not_found,
-    _record_patch_failure, _reset_patch_failures, _task_data, _update_read_timestamp)
+    _record_patch_failure, _reset_patch_failures, _task_data, _update_read_timestamp,
+    _get_patch_failure_count)
 
 logger = logging.getLogger(__name__)
 
+# Facade slots so tests can patch tools.file_tools (write guards read these at call time).
+_hermes_config_resolved = None
+_hermes_config_resolved_loaded = False
+
 
 _EXPECTED_WRITE_ERRNOS = {errno.EACCES, errno.EPERM, errno.EROFS}
+
+
+def _read_file_content(path: str) -> str:
+    """Read a file's content for patch auto-suggest. Returns empty on error."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+# Invisible / compatibility spaces that render like a normal space in a
+# terminal. Folding them (plus NFC) lets read_file recover a path the
+# model retyped visually-correctly but with the wrong bytes.
+_FILENAME_SPACE_FOLDS = (
+    "\u00a0",  # no-break space
+    "\u202f",  # narrow no-break space
+    "\u2007",  # figure space
+    "\u2009",  # thin space
+    "\u200a",  # hair space
+)
+
+
+def _fold_filename_for_unicode_match(name: str) -> str:
+    folded = unicodedata.normalize("NFC", name)
+    for src in _FILENAME_SPACE_FOLDS:
+        folded = folded.replace(src, " ")
+    return folded
+
+
+def _find_unicode_equivalent_path(requested: Path) -> Path | None:
+    """Return the single same-dir file that is a unicode-equivalent of *requested*.
+
+    Conservative: only NFC + invisible-space folding, and only when exactly
+    one sibling matches. Visible differences (straight vs curly quote,
+    missing accents) stay as not-found + similar_files.
+    """
+    try:
+        parent = requested.parent
+        if not parent.is_dir():
+            return None
+        target = _fold_filename_for_unicode_match(requested.name)
+        matches = [
+            entry
+            for entry in parent.iterdir()
+            if entry.is_file()
+            and _fold_filename_for_unicode_match(entry.name) == target
+        ]
+    except OSError:
+        return None
+    if len(matches) == 1 and matches[0].name != requested.name:
+        return matches[0]
+    return None
+
+
+# ── Self-correction retry threshold (issue #996) ─────────────────────────
+# Controls how many consecutive patch failures on the same file are allowed
+# before the error is classified as "permanent" and the model is told to
+# stop retrying.  Read from ``patch.self_correction_retries`` in config.yaml
+# on first call, cached for the process lifetime.  Default 3, max 5.
+_DEFAULT_SELF_CORRECTION_RETRIES = 3
+_MAX_SELF_CORRECTION_RETRIES = 5
+_self_correction_retries_cached: int | None = None
+
+
+def _get_self_correction_retries() -> int:
+    """Return the configured self-correction retry threshold for patches."""
+    global _self_correction_retries_cached
+    if _self_correction_retries_cached is not None:
+        return _self_correction_retries_cached
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        patch_cfg = cfg.get("patch", {})
+        val = patch_cfg.get("self_correction_retries")
+        if (
+            isinstance(val, (int, float))
+            and 1 <= int(val) <= _MAX_SELF_CORRECTION_RETRIES
+        ):
+            _self_correction_retries_cached = int(val)
+            return _self_correction_retries_cached
+    except Exception:
+        pass
+    _self_correction_retries_cached = _DEFAULT_SELF_CORRECTION_RETRIES
+    return _self_correction_retries_cached
+
+
+def _find_auto_repaired_path(
+    requested: Path,
+    raw_path: str,
+    task_id: str = "default",
+) -> tuple[Path | None, str | None]:
+    """Find a single unambiguous valid path candidate when *requested* does not exist (#2411).
+
+    Strategies evaluated in priority order:
+      1. Unicode normalization (NFC + invisible-space folding via _find_unicode_equivalent_path)
+      2. Case-insensitive match in the requested parent directory (e.g. readme.md -> README.md)
+      3. Case-insensitive component-wise path traversal (e.g. Tools/file_tools.py -> tools/file_tools.py)
+      4. Workspace-root fallback (if relative path failed against cwd)
+      5. Extraneous prefix stripping (e.g. hermes-agent/tools/foo.py -> tools/foo.py)
+      6. Unique filename in workspace tree (for non-generic filenames >3 chars)
+
+    Returns (repaired_path, explanation_hint) or (None, None) if ambiguous or none found.
+    """
+    # 1. Unicode normalization
+    unicode_hit = _find_unicode_equivalent_path(requested)
+    if unicode_hit is not None and unicode_hit.is_file():
+        return (
+            unicode_hit,
+            f"Opened unicode-equivalent filename {unicode_hit.name!r} instead of {requested.name!r}.",
+        )
+
+    # 2. Case-insensitive match in parent directory
+    try:
+        parent = requested.parent
+        if parent.is_dir():
+            target_lower = requested.name.lower()
+            ci_matches = [
+                entry
+                for entry in parent.iterdir()
+                if entry.is_file() and entry.name.lower() == target_lower
+            ]
+            if len(ci_matches) == 1 and ci_matches[0].name != requested.name:
+                return (
+                    ci_matches[0],
+                    f"Opened case-corrected filename {ci_matches[0].name!r} instead of {requested.name!r}.",
+                )
+    except OSError:
+        pass
+
+    # 3. Case-insensitive component-wise path traversal
+    try:
+        curr_dir = requested.parent
+        unresolved_parts = [requested.name]
+        while not curr_dir.exists() and curr_dir.parent != curr_dir:
+            unresolved_parts.insert(0, curr_dir.name)
+            curr_dir = curr_dir.parent
+        if (
+            curr_dir.exists()
+            and curr_dir.is_dir()
+            and unresolved_parts != [requested.name]
+        ):
+            matched_all = True
+            for part in unresolved_parts:
+                if not curr_dir.is_dir():
+                    matched_all = False
+                    break
+                part_lower = part.lower()
+                matches = [
+                    e for e in curr_dir.iterdir() if e.name.lower() == part_lower
+                ]
+                if len(matches) == 1:
+                    curr_dir = matches[0]
+                else:
+                    matched_all = False
+                    break
+            if matched_all and curr_dir.is_file() and curr_dir != requested:
+                return (
+                    curr_dir,
+                    f"Opened case-corrected path '{curr_dir}' instead of '{raw_path}'.",
+                )
+    except OSError:
+        pass
+
+    # 4. Workspace / Project root vs CWD fallback
+    ws_root = None
+    base_dir = None
+    try:
+        ws_root = _authoritative_workspace_root(task_id)
+        base_dir = str(_resolve_base_dir(task_id, container_paths=False))
+        if not Path(raw_path).is_absolute():
+            # Check explicit workspace root
+            if ws_root and ws_root != base_dir:
+                ws_candidate = (Path(ws_root) / raw_path).resolve()
+                if ws_candidate.is_file() and ws_candidate != requested:
+                    return (
+                        ws_candidate,
+                        f"Resolved path relative to workspace root '{ws_root}' instead of working directory.",
+                    )
+            # Check project root by walking up to find .git, pyproject.toml, package.json, config.yaml
+            start_dir = Path(base_dir if base_dir else os.getcwd())
+            proj_root = start_dir
+            while proj_root.parent != proj_root:
+                if (
+                    (proj_root / ".git").exists()
+                    or (proj_root / "pyproject.toml").exists()
+                    or (proj_root / "package.json").exists()
+                    or (proj_root / "config.yaml").exists()
+                ):
+                    break
+                proj_root = proj_root.parent
+            if proj_root != start_dir:
+                proj_cand = (proj_root / raw_path).resolve()
+                if proj_cand.is_file() and proj_cand != requested:
+                    return (
+                        proj_cand,
+                        f"Resolved path relative to project root '{proj_root}' instead of working directory.",
+                    )
+            if base_dir:
+                cwd_candidate = (Path(base_dir) / raw_path).resolve()
+                if cwd_candidate.is_file() and cwd_candidate != requested:
+                    return (
+                        cwd_candidate,
+                        f"Resolved path relative to working directory '{base_dir}'.",
+                    )
+    except Exception:
+        pass
+
+    # 5. Extraneous prefix stripping (e.g. repo name or /workspace/ or workspace/)
+    try:
+        raw_parts = Path(raw_path.lstrip("/\\")).parts
+        if len(raw_parts) > 1:
+            base_p = Path(base_dir if base_dir else os.getcwd())
+            ws_p = Path(ws_root) if ws_root else base_p
+            # Try stripping 1 leading component
+            stripped_1 = Path(*raw_parts[1:])
+            for anchor in (base_p, ws_p):
+                cand = (anchor / stripped_1).resolve()
+                if cand.is_file() and cand != requested:
+                    return (
+                        cand,
+                        f"Stripped leading directory prefix from '{raw_path}' to '{cand}'.",
+                    )
+            # If 2+ components and starts with common container/repo names, try stripping 2
+            if len(raw_parts) > 2 and raw_parts[0].lower() in {
+                "workspace",
+                "config",
+                "app",
+            }:
+                stripped_2 = Path(*raw_parts[2:])
+                for anchor in (base_p, ws_p):
+                    cand = (anchor / stripped_2).resolve()
+                    if cand.is_file() and cand != requested:
+                        return (
+                            cand,
+                            f"Stripped leading directory prefix from '{raw_path}' to '{cand}'.",
+                        )
+    except Exception:
+        pass
+
+    # 6. Unique matching file in workspace tree for non-generic filenames
+    _GENERIC_NAMES = frozenset({
+        "__init__.py",
+        "index.js",
+        "index.ts",
+        "index.html",
+        "setup.py",
+        "pyproject.toml",
+        "package.json",
+        "cargo.toml",
+        "main.py",
+        "app.py",
+        "readme.md",
+        "license",
+        "config.yaml",
+        "config.yml",
+        "config.json",
+        "conftest.py",
+        "makefile",
+        "dockerfile",
+    })
+    filename = requested.name
+    if filename.lower() not in _GENERIC_NAMES and len(filename) > 3:
+        try:
+            ws_root_path = Path(
+                ws_root if ws_root else (base_dir if base_dir else os.getcwd())
+            )
+            if ws_root_path.is_dir():
+                matches = []
+                target_name_lower = filename.lower()
+                for root_dir, dirs, files in os.walk(ws_root_path):
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d
+                        not in {
+                            ".git",
+                            ".venv",
+                            "venv",
+                            "node_modules",
+                            "__pycache__",
+                            ".pytest_cache",
+                            ".claude",
+                        }
+                    ]
+                    for f in files:
+                        if f.lower() == target_name_lower:
+                            matches.append(Path(root_dir) / f)
+                            if len(matches) > 1:
+                                break
+                    if len(matches) > 1:
+                        break
+                if (
+                    len(matches) == 1
+                    and matches[0].is_file()
+                    and matches[0] != requested
+                ):
+                    return (
+                        matches[0],
+                        f"Found unique matching file '{matches[0]}' in workspace for '{raw_path}'.",
+                    )
+        except Exception:
+            pass
+
+    return None, None
+
 
 # Read-size guard. Model-agnostic, so characters proxy tokens: 100K chars is
 # ~25-35K tokens across typical tokenisers. Configurable: file_read_max_chars.
@@ -684,16 +1007,66 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT, 
                 and version_before == cached_version and content_served_in_generation):
             return _dedup_stub_or_block(task_data, dedup_key, path)
 
+        # Host file ops need the resolved absolute path (shell cwd may differ;
+        # #1044). Remote backends keep the caller path and resolve it themselves.
         result = file_ops.read_file(resolved_str if _file_ops_uses_host_paths(file_ops) else path, offset, limit)
         result_dict = result.to_dict()
 
         # Failed reads cannot establish whole-file knowledge.
         _err = result_dict.get("error") or ""
         if isinstance(_err, str) and _err.startswith("File not found:"):
-            from tools.tool_result_storage import expired_archive_fields
-            result_dict.update(expired_archive_fields(path))
-            _record_not_found("read", resolved_str, task_id, json.dumps(result_dict, ensure_ascii=False))
-        if _err or result_dict.get("is_binary"):
+            # #2411 — auto-repair: try to find an unambiguous valid path
+            # (unicode-equivalent, case-corrected, workspace-root fallback,
+            # prefix-stripped, or unique workspace file) before giving up.
+            repaired_path, repair_note = _find_auto_repaired_path(
+                Path(str(_resolved)), raw_path=path, task_id=task_id
+            )
+            if repaired_path is not None:
+                repaired = file_ops.read_file(str(repaired_path), offset, limit)
+                repaired_dict = repaired.to_dict()
+                if not repaired_dict.get("error"):
+                    existing_hint = repaired_dict.get("hint") or ""
+                    repaired_dict["hint"] = (
+                        f"{existing_hint} {repair_note}".strip()
+                        if existing_hint
+                        else repair_note
+                    )
+                    result = repaired
+                    result_dict = repaired_dict
+                    _err = ""
+            if isinstance(_err, str) and _err.startswith("File not found:"):
+                # #2293 — if the shell-based _suggest_similar_files found nothing
+                # (no similar_files), fall back to the shared pure-Python module
+                # so the agent still gets a nearby-files hint.
+                if not result_dict.get("similar_files"):
+                    _nearby = suggest_nearby_paths(str(_resolved))
+                    _hint = format_nearby_hint(str(_resolved), _nearby)
+                    if _hint:
+                        result_dict["error"] = _err + "\n\n" + _hint
+                from tools.tool_result_storage import expired_archive_fields
+                result_dict.update(expired_archive_fields(path))
+                _not_found_json = json.dumps(result_dict, ensure_ascii=False)
+                _record_not_found("read", resolved_str, task_id, _not_found_json)
+
+        # ── Per-session read_file failure-rate directive (#1370) ──────
+        # read_file has the highest failure rate of any core tool.
+        # Track cumulative failures per session and inject a directive when
+        # they pile up — before the agent burns another 5 turns guessing wrong paths.
+        if result_dict.get("error"):
+            with _read_tracker_lock:
+                task_data = _read_tracker.setdefault(task_id, {
+                    "consecutive": 0,
+                    "last_key": None,
+                    "read_history": set(),
+                })
+                task_data["total_failures"] = task_data.get("total_failures", 0) + 1
+                fail_count = task_data["total_failures"]
+                if fail_count >= 4:
+                    result_dict["_rate_directive"] = (
+                        f"read_file has failed {fail_count} times in this session. "
+                        "Stop guessing file paths. Use search_files or repo_map to find existing files."
+                    )
+        if result_dict.get("error") or result_dict.get("is_binary"):
             return json.dumps(result_dict, ensure_ascii=False)
 
         # Char budget on the FORMATTED content (what enters context), BEFORE
@@ -1459,33 +1832,6 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
 # Schemas + Registry
 # ---------------------------------------------------------------------------
 from tools.registry import registry, tool_error
-from pathlib import Path, PurePosixPath
-from tools.path_validation import format_nearby_hint, suggest_nearby_paths
-
-
-def _get_self_correction_retries() -> int:
-    """Return the configured self-correction retry threshold for patches."""
-    global _self_correction_retries_cached
-    if _self_correction_retries_cached is not None:
-        return _self_correction_retries_cached
-    try:
-        from hermes_cli.config import load_config
-
-        cfg = load_config()
-        patch_cfg = cfg.get("patch", {})
-        val = patch_cfg.get("self_correction_retries")
-        if (
-            isinstance(val, (int, float))
-            and 1 <= int(val) <= _MAX_SELF_CORRECTION_RETRIES
-        ):
-            _self_correction_retries_cached = int(val)
-            return _self_correction_retries_cached
-    except Exception:
-        pass
-    _self_correction_retries_cached = _DEFAULT_SELF_CORRECTION_RETRIES
-    return _self_correction_retries_cached
-
-
 
 
 def _check_file_reqs():

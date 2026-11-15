@@ -12,31 +12,140 @@ import hashlib
 import json
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from utils import safe_json_loads
 from agent.tool_result_classification import (
     shape_failure_error, file_mutation_result_landed, has_failure_marker, is_guardrail_refusal, is_rate_limited)
 
+if TYPE_CHECKING:  # avoid a circular import; policy_interceptors imports this module
+    from agent.policy_interceptors import PolicyInterceptorRegistry
+    from agent.recheck_suppression import RecheckController
 
-IDEMPOTENT_TOOL_NAMES = frozenset({
-    "read_file", "search_files", "web_search", "web_extract", "session_search", "skill_view", "skills_list",
-    "browser_snapshot", "browser_console", "browser_get_images", "mcp_filesystem_read_file",
-    "mcp_filesystem_read_text_file", "mcp_filesystem_read_multiple_files", "mcp_filesystem_list_directory",
-    "mcp_filesystem_list_directory_with_sizes", "mcp_filesystem_directory_tree", "mcp_filesystem_get_file_info",
-    "mcp_filesystem_search_files",
+IDEMPOTENT_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "search_files",
+        "web_search",
+        "web_extract",
+        "session_search",
+        "skill_view",
+        "skills_list",
+        "browser_snapshot",
+        "browser_console",
+        "browser_get_images",
+        "mcp_filesystem_read_file",
+        "mcp_filesystem_read_text_file",
+        "mcp_filesystem_read_multiple_files",
+        "mcp_filesystem_list_directory",
+        "mcp_filesystem_list_directory_with_sizes",
+        "mcp_filesystem_directory_tree",
+        "mcp_filesystem_get_file_info",
+        "mcp_filesystem_search_files",
+    }
+)
+
+MUTATING_TOOL_NAMES = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "write_file",
+        "patch",
+        "todo",
+        "todo_list",
+        "memory",
+        "skill_manage",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_scroll",
+        "browser_navigate",
+        "send_message",
+        "cronjob",
+        "cronjob_manage",
+        "delegate_task",
+        "process",
+        "process_manage",
+    }
+)
+
+# #974/#969/#970 — tools whose retry spirals are the system's largest failure
+# sources. Trace-miner evidence: terminal (1237 failures / 410 sessions),
+# execute_code (59 failures / 14 sessions, max 17 consecutive retries),
+# read_file (26 failures / 10 sessions with ≥5 consecutive reads). These tools
+# get an always-on per-tool failure cap that halts regardless of
+# ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
+# #1141 — process added: an 18-deep process polling spiral was observed in
+# production (11 failures, 1 session). process poll/wait loops that each
+# "succeed" but never converge on a terminal state run uncapped without this.
+# #1143 — search_files added: 27 consecutive search_files calls across 224
+# sessions (190 failures) regressed from 15/8 — the agent reformulates
+# patterns (glob vs regex, retries after empty results) without switching
+# strategy. Cap consecutive search_files calls to force a strategy switch.
+# #1185/#1186/#1187 — deferred-tool loading chain + memory added:
+# tool_call (168 failures / 21 sessions, 13-deep spirals), memory
+# (94 failures / 21 sessions, 11-deep, regressed 10x from #1135/#1136),
+# tool_describe (59 failures, the search→describe→call middle step). These
+# had no circuit breaker — the agent blind-retried the same failing call up
+# to 13 consecutive times with no fallback. Extending the existing cap covers
+# the whole deferred-tool chain consistently with the core tools.
+_SPIRAL_PRONE_TOOLS = frozenset({
+    "terminal",
+    "execute_code",
+    "read_file",
+    "process",
+    "process_manage",
+    "search_files",
+    "tool_call",
+    "tool_describe",
+    "memory",
+    "patch",
+    "write_file",
 })
 
-MUTATING_TOOL_NAMES = frozenset({
-    "terminal", "execute_code", "write_file", "patch", "todo_list", "memory", "skill_manage",
-    "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_navigate",
-    "send_message", "cronjob_manage", "delegate_task", "process_manage",
-})
+# #1585 — number of consecutive successes required before a spiral-prone
+# tool's cross-turn failure streak decays by 1. The production terminal
+# spiral is fail, diagnostic-success (pwd, ls), fail, repeating — and the
+# fallback directive actively recommends the diagnostic. With a 1-success
+# decay that pattern nets 0 per cycle and the cap is unreachable. Requiring
+# a sustained run means a single interspersed success does not drain the
+# streak, so fail/succeed/fail climbs +1 per cycle toward the cap.
+_SUCCESSES_TO_DECAY = 2
+# Read-only exploration tools: a single successful diagnostic (re-read,
+# a search that hits) should drain the streak. Mutating tools keep 2 so
+# fail → pwd/ls → fail still climbs (council 2026-08-31).
+_READ_ONLY_SUCCESSES_TO_DECAY = 1
+_READ_ONLY_DECAY_TOOLS = frozenset({"read_file", "search_files"})
 
-# Pollers: legitimately re-invoked with identical args; the identical-call NOTICE never fires.
-STALL_GUARD_REPEATABLE_TOOLS = frozenset({"process_manage"})
-_STALL_GUARD_REPEATABLE_SUFFIXES = ("_get_result", "_poll")  # generated / MCP poller conventions
-# Nth consecutive identical (tool, args, result) call that fires the notice; 3 tolerates one double-check.
+
+def _successes_needed_to_decay(tool_name: str) -> int:
+    if tool_name in _READ_ONLY_DECAY_TOOLS:
+        return _READ_ONLY_SUCCESSES_TO_DECAY
+    return _SUCCESSES_TO_DECAY
+
+# Tools that are legitimately re-invoked with identical arguments and may
+# legitimately return an unchanged result while waiting on external progress —
+# background-process management and job pollers. The identical-call loop
+# notice (agent.stall_guards) never fires for these, so polling patterns like
+# ``process(action="poll")`` or repeatedly checking a generation job stay
+# unannotated.
+STALL_GUARD_REPEATABLE_TOOLS = frozenset(
+    {
+        "process_manage",
+    }
+)
+
+# Poller naming conventions (e.g. ``<vendor>_get_result``) used by generated /
+# MCP tool surfaces. Matched as suffixes so vendor-prefixed pollers are exempt
+# without enumerating every vendor.
+_STALL_GUARD_REPEATABLE_SUFFIXES = (
+    "_get_result",
+    "_poll",
+)
+
+# The notice fires on the Nth consecutive identical call (same tool, same
+# canonical args, same result). 3 tolerates one legitimate double-check while
+# catching the observed re-issue loops (3x/4x identical calls in eval traces).
 STALL_GUARD_IDENTICAL_CALL_THRESHOLD = 3
 # Repeating multi-call cycles (A,B,A,B,... with identical args AND results) defeat the
 # consecutive streak above — every alternation resets it, so a model replaying the same
@@ -405,13 +514,44 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
     if is_guardrail_refusal(result):
         return False, ""
 
-    if tool_name == "terminal":
+    # Terminal and process: non-zero exit code is the canonical failure
+    # signal. The process tool (action=poll/log/wait) returns a JSON dict
+    # with exit_code but no "error" key when the background process exits
+    # non-zero — without this check those results are misclassified as
+    # successes and the spiral cap never fires (#1839).
+    if tool_name in ("terminal", "process", "process_manage"):
         data = safe_json_loads(result)
-        exit_code = data.get("exit_code") if isinstance(data, dict) else None
-        return (True, f" [exit {exit_code}]") if exit_code is not None and exit_code != 0 else (False, "")
+        if isinstance(data, dict):
+            exit_code = data.get("exit_code")
+            if exit_code is not None and exit_code != 0:
+                return True, f" [exit {exit_code}]"
+            # #2241 — process-specific failure patterns that don't carry an
+            # exit_code.  process_registry returns {"status": "not_found",
+            # "error": "No process with ID …"} for session-not-found,
+            # {"status": "error", "error": str(e)} for action failures, and
+            # {"success": False, "error": …} for write/submit rejections.
+            # Without these checks the early ``return False`` above swallows
+            # them, the streak counter never accumulates, and the spiral cap
+            # never fires — regressing to 18-deep (#2241).
+            if tool_name in ("process", "process_manage"):
+                status = data.get("status")
+                if status in ("not_found", "error", "already_exited"):
+                    return True, f" [{status}]"
+                if data.get("success") is False:
+                    return True, " [failed]"
+                if data.get("error") and not data.get("output"):
+                    return True, " [error]"
+        return False, ""
 
+    # #1188 — mirror the bot_detection_warning check from _detect_tool_failure
+    # so the fallback classifier never disagrees with the production path.
     data = safe_json_loads(result)
     if isinstance(data, dict):
+        if (
+            data.get("success") is True
+            and isinstance(data.get("bot_detection_warning"), str)
+        ):
+            return True, " [bot detection]"
         failed = data.get("success") is False
         if tool_name == "memory" and failed and "exceed the limit" in data.get("error", ""):
             return True, " [full]"
@@ -582,37 +722,219 @@ class ToolCallGuardrailController:
             self._halt_decision = decision
         return decision
 
-    def before_call(self, tool_name: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
-        args = _coerce_args(args)
-        signature = ToolCallSignature.from_call(tool_name, args)
-        allow = ToolGuardrailDecision(tool_name=tool_name, signature=signature)
+    def before_call(
+        self, tool_name: str, args: Mapping[str, Any] | None
+    ) -> ToolGuardrailDecision:
+        # Policy interceptors run first and apply regardless of hard_stop_enabled:
+        # a denied policy is a deterministic user rule, not a loop limit.
+        if self.policy_registry is not None and self.policy_registry.enabled:
+            policy_decision = self.policy_registry.evaluate(tool_name, args)
+            if not policy_decision.allows_execution:
+                self._halt_decision = policy_decision
+                return policy_decision
 
-        # Loop caps apply regardless of hard_stop_enabled (which only governs the detector).
-        cap_block = self._check_loop_cap(tool_name, args, signature)
-        if cap_block is not None or not self.config.hard_stop_enabled:
-            return cap_block or allow
-        # A mutation since this call last failed makes the retry a new experiment.
-        exact_count = 0 if self._progress_since_failure.get(signature) else self._exact_failure_counts.get(signature, 0)
-        if exact_count >= self.config.exact_failure_block_after:
-            return self._decide("block", "repeated_exact_failure_block", tool_name, exact_count, signature)
-        record = self._no_progress.get(signature) if self._is_idempotent(tool_name) else None
-        if record is not None and record[1] >= self.config.no_progress_block_after:
-            return self._decide("block", "idempotent_no_progress_block", tool_name, record[1], signature)
-        return allow
+        signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
+
+        exact_count = self._exact_failure_counts.get(signature, 0)
+        if self._progress_since_failure.get(signature):
+            exact_count = 0
+        if self.config.hard_stop_enabled and exact_count >= self.config.exact_failure_block_after:
+            decision = ToolGuardrailDecision(
+                action="block",
+                code="repeated_exact_failure_block",
+                message=(
+                    f"Blocked {tool_name}: the same tool call failed {exact_count} "
+                    "times with identical arguments. Stop retrying it unchanged; "
+                    "change strategy or explain the blocker."
+                ),
+                tool_name=tool_name,
+                count=exact_count,
+                signature=signature,
+            )
+            self._halt_decision = decision
+            return decision
+
+        # #1826 — session-level permanent hard-stop. Once a tool has been
+        # session-hard-stopped, ALL subsequent calls are blocked unconditionally
+        # for the remainder of the session. This is the unconditional ceiling:
+        # it does not depend on error classification and cannot be bypassed by
+        # interspersed successes or reset_for_turn. This is the structural fix
+        # for the 5th recurrence of the terminal retry spiral.
+        if tool_name in self._session_hard_stopped:
+            directive = _fallback_directive_for(tool_name)
+            if (
+                _is_browser_tool(tool_name)
+                and tool_name not in self.config.spiral_prone_tools
+            ):
+                code = "browser_tool_failure_cap"
+            else:
+                code = "session_hard_stop"
+            decision = ToolGuardrailDecision(
+                action="block",
+                code=code,
+                message=(
+                    f"Blocked {tool_name}: it has been permanently halted for this "
+                    f"session after reaching the retry cap. This failure pattern is "
+                    "deterministic — retrying will not fix it. Use the fallback "
+                    "directive below."
+                ),
+                tool_name=tool_name,
+                count=self._cross_turn_tool_failure_counts.get(tool_name, 0),
+                signature=signature,
+                fallback_directive=directive,
+            )
+            self._halt_decision = decision
+            return decision
+
+        # Cross-turn spiral enforcement (#1109/#1110/#1111/#1112): if the
+        # same tool has been failing across turns and the cross-turn streak
+        # has already reached the cap, block execution immediately — BEFORE
+        # the hard_stop_enabled gate.  This makes the browser/spiral caps
+        # truly always-on: the model gets a synthetic blocked result with
+        # the fallback directive instead of being allowed to execute the
+        # same failing call again.  reset_for_turn clears _halt_decision but
+        # NOT _cross_turn_tool_failure_counts, so the streak survives.
+        cross_turn_count = self._cross_turn_tool_failure_counts.get(tool_name, 0)
+        effective_spiral_cap = self._effective_cap_for(tool_name)
+        if cross_turn_count >= 1 and (
+            (
+                effective_spiral_cap >= 1
+                and tool_name in self.config.spiral_prone_tools
+                and tool_name not in FAILURE_TOLERANT_TOOL_NAMES
+                and cross_turn_count >= effective_spiral_cap
+            )
+            or (
+                self.config.browser_failure_cap >= 1
+                and _is_browser_tool(tool_name)
+                and cross_turn_count >= self.config.browser_failure_cap
+            )
+        ):
+            directive = _fallback_directive_for(tool_name)
+            if (
+                _is_browser_tool(tool_name)
+                and tool_name not in self.config.spiral_prone_tools
+            ):
+                code = "browser_tool_failure_cap"
+                cap = self.config.browser_failure_cap
+            else:
+                code = "spiral_prone_tool_failure_cap"
+                cap = effective_spiral_cap
+            decision = ToolGuardrailDecision(
+                action="block",
+                code=code,
+                message=(
+                    f"Blocked {tool_name}: it has failed {cross_turn_count} times across "
+                    f"recent turns, reaching the retry cap ({cap}). This failure pattern "
+                    "is deterministic — retrying the same way will not fix it. "
+                    "Use the fallback directive below."
+                ),
+                tool_name=tool_name,
+                count=cross_turn_count,
+                signature=signature,
+                fallback_directive=directive,
+            )
+            self._halt_decision = decision
+            return decision
+
+        # #1041 — recheck suppression. Config-gated via ``recheck_controller``
+        # (None/disabled by default -> skipped). Suppresses a single immediate
+        # identical repeat of a successful read-only call as a redundant
+        # self-verification, returning a non-halting ``suppress`` decision
+        # (allows_execution False, should_halt False) so the one call is skipped
+        # but the turn continues. Every idempotent-call decision is logged for
+        # calibration.
+        if (
+            self.recheck_controller is not None
+            and self.recheck_controller.enabled
+            and self._is_idempotent(tool_name)
+        ):
+            is_immediate_repeat = (
+                self._last_signature is not None
+                and signature == self._last_signature
+                and self._last_call_succeeded
+            )
+            suppress, _result = self.recheck_controller.decide(
+                tool_name,
+                is_idempotent=True,
+                is_immediate_repeat=is_immediate_repeat,
+                prior_succeeded=self._last_call_succeeded,
+            )
+            if suppress:
+                return ToolGuardrailDecision(
+                    action="suppress",
+                    code="recheck_suppressed",
+                    message=(
+                        f"Suppressed {tool_name}: this read-only call is an immediate "
+                        "repeat of one that just succeeded with identical arguments. "
+                        "Reuse the previous result instead of re-verifying it."
+                    ),
+                    tool_name=tool_name,
+                    count=0,
+                    signature=signature,
+                )
+        # ── Per-turn runaway-loop caps ──────────────────────────────────
+        # These are hard ceilings on how many times a runaway-prone tool may
+        # be called within a single agent loop (turn). They apply regardless
+        # of hard_stop_enabled (which only governs the per-turn loop detector).
+        # We block BEFORE the call runs once the count is already at the cap,
+        # then increment for an allowed call so the (cap+1)-th is refused.
+        cap_block = self._check_loop_cap(tool_name, _coerce_args(args), signature)
+        if cap_block is not None:
+            return cap_block
+
+        if not self.config.hard_stop_enabled:
+            return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
+
+        if self._is_idempotent(tool_name):
+            record = self._no_progress.get(signature)
+            if record is not None:
+                _result_hash, repeat_count = record
+                if repeat_count >= self.config.no_progress_block_after:
+                    decision = ToolGuardrailDecision(
+                        action="block",
+                        code="idempotent_no_progress_block",
+                        message=(
+                            f"Blocked {tool_name}: this read-only call returned the same "
+                            f"result {repeat_count} times. Stop repeating it unchanged; "
+                            "use the result already provided or try a different query."
+                        ),
+                        tool_name=tool_name,
+                        count=repeat_count,
+                        signature=signature,
+                    )
+                    self._halt_decision = decision
+                    return decision
+
+        return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
     def after_call(
-        self, tool_name: str, args: Mapping[str, Any] | None, result: str | None,
-        *, failed: bool | None = None,
+        self,
+        tool_name: str,
+        args: Mapping[str, Any] | None,
+        result: str | None,
+        *,
+        failed: bool | None = None,
     ) -> ToolGuardrailDecision:
         args = _coerce_args(args)
         signature = ToolCallSignature.from_call(tool_name, args)
         if failed is None:
             failed, _ = classify_tool_failure(tool_name, result)
-        warnings = self.config.warnings_enabled
+
+        # #1041 — record the last executed call so the next before_call can
+        # detect an immediate identical recheck of a successful read-only call.
+        self._last_signature = signature
+        self._last_call_succeeded = not failed
+
+        # Feed the per-turn observation ledger so ordering-aware policy
+        # interceptors (e.g. read-before-write) can see prior calls.
+        if self.policy_registry is not None and self.policy_registry.enabled:
+            self.policy_registry.record_observation(tool_name, args, failed=failed)
 
         if failed:
-            # An identical failing call is only a REPLAY if nothing landed in between;
-            # a mutation since the last identical failure restarts the exact-args streak.
+            # An identical failing call is only a REPLAY if nothing landed in
+            # between. If any mutating call succeeded since the previous
+            # identical failure (edit -> re-run pytest, click -> re-snapshot),
+            # the retry is a new experiment: restart the exact-args streak.
             if self._progress_since_failure.pop(signature, False):
                 self._exact_failure_counts.pop(signature, None)
             # A throttled call retried after its cooldown is the correct move, not a replay:
@@ -623,76 +945,341 @@ class ToolCallGuardrailController:
             exact_count = self._exact_failure_counts.get(signature, 0)
             if not throttled:
                 exact_count = self._exact_failure_counts[signature] = exact_count + 1
-            same_count = self._same_tool_failure_counts[tool_name] = self._same_tool_failure_counts.get(tool_name, 0) + 1
             self._no_progress.pop(signature, None)
-            # same_tool_failure counts DIFFERENT args on one tool; for failure-tolerant
-            # tools a run of distinct red commands is diagnosis, not a loop — warn, never halt.
+
+            same_count = self._same_tool_failure_counts.get(tool_name, 0) + 1
+            self._same_tool_failure_counts[tool_name] = same_count
+
+            # Cross-turn accumulation: the same tool failing once per turn
+            # is the dominant spiral pattern.  The per-turn counter resets
+            # each API turn, so without this cross-turn tracker the cap
+            # only catches rare within-turn spirals (multiple calls in one
+            # tool batch).  Here we carry the streak forward.
+            cross_turn_count = (
+                self._cross_turn_tool_failure_counts.get(tool_name, 0) + 1
+            )
+            self._cross_turn_tool_failure_counts[tool_name] = cross_turn_count
+            # #1585 — a failure breaks the consecutive-success chain, so the
+            # sustained-recovery counter restarts from zero.
+            self._cross_turn_success_streaks.pop(tool_name, None)
+
+            # Effective streak is the max of per-turn and cross-turn counts.
+            # Within-turn spirals (5 calls in one batch) still trip the cap
+            # via the per-turn count; cross-turn spirals (1 call/turn for 5
+            # turns) trip it via the cross-turn count.
+            effective_streak = max(same_count, cross_turn_count)
+
+            # #745 — browser tools get an always-on per-tool failure cap that
+            # halts REGARDLESS of ``hard_stop_enabled``. Browser retries are
+            # expensive and their deterministic failures (CDP down, nav timeout,
+            # missing tool) do not recover on a blind retry, so bound the spiral
+            # even in the default hard-stop-off mode. This mirrors the per-URL
+            # cap in ``tools/browser_navigate_fallback`` and does NOT change the
+            # generic hard_stop circuit breaker for native tools below.
             if (
-                # Hard-stop widening (#89069 / #100849 bundle): the per-turn no-progress BLOCK above only
-                # covers tools in idempotent_tools, so a model replaying the same successful
-                # `terminal`/`skill_view` call with a byte-identical result ran until the iteration budget.
-                # The consecutive-identical streak is tool-agnostic; when hard stops are enabled, halt at
-                # the same idempotent_no_progress threshold. Pollers stay exempt (an unchanged poll is
-                # progress).
-                self.config.hard_stop_enabled
-                and tool_name not in FAILURE_TOLERANT_TOOL_NAMES
-                and same_count >= self.config.same_tool_failure_halt_after
+                self.config.browser_failure_cap >= 1
+                and _is_browser_tool(tool_name)
+                and effective_streak >= self.config.browser_failure_cap
             ):
-                return self._decide("halt", "same_tool_failure_halt", tool_name, same_count, signature)
-            if warnings and not throttled and exact_count >= self.config.exact_failure_warn_after:
-                return self._decide("warn", "repeated_exact_failure_warning", tool_name, exact_count, signature)
-            if warnings and same_count >= self.config.same_tool_failure_warn_after:
-                return self._decide(
-                    "warn", "same_tool_failure_warning", tool_name, same_count, signature,
-                    message=_tool_failure_recovery_hint(tool_name, same_count),
+                # #1826 — session-hard-stop browser tools too so they don't
+                # recur after interspersed successes on a different page.
+                self._session_hard_stopped.add(tool_name)
+                decision = ToolGuardrailDecision(
+                    action="halt",
+                    code="browser_tool_failure_cap",
+                    message=(
+                        f"Stopped {tool_name}: it failed {effective_streak} times, "
+                        f"reaching the browser retry cap ({self.config.browser_failure_cap}). "
+                        "Browser retries are expensive and this failure is deterministic — "
+                        "stop re-driving the browser and use the fallback."
+                    ),
+                    tool_name=tool_name,
+                    count=effective_streak,
+                    signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
                 )
-            return ToolGuardrailDecision(tool_name=tool_name, count=exact_count, signature=signature)
+                self._halt_decision = decision
+                return decision
+
+            # #974/#969/#970 — terminal, execute_code, and read_file are the
+            # system's largest failure sources. Their retry spirals persist
+            # because the loop_guard's fallback_directive is advisory (the
+            # agent ignores it and retries). This always-on cap halts the
+            # turn after N consecutive same-tool failures REGARDLESS of
+            # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
+            # The fallback_directive gives the agent a concrete alternative.
+            if (
+                self._effective_cap_for(tool_name) >= 1
+                and tool_name in self.config.spiral_prone_tools
+                and effective_streak >= self._effective_cap_for(tool_name)
+            ):
+                _cap = self._effective_cap_for(tool_name)
+                # When hard_stop_enabled is True on unattended platforms, distinct commands
+                # of failure-tolerant tools warn instead of halting (Teknium Sep 2026).
+                if self.config.hard_stop_enabled and tool_name in FAILURE_TOLERANT_TOOL_NAMES and exact_count < self.config.exact_failure_block_after:
+                    pass
+                else:
+                    self._session_hard_stopped.add(tool_name)
+                    directive = _fallback_directive_for(tool_name)
+                    decision = ToolGuardrailDecision(
+                        action="halt",
+                        code="spiral_prone_tool_failure_cap",
+                        message=(
+                            f"Stopped {tool_name}: it failed {effective_streak} times, "
+                            f"reaching the retry cap ({_cap}). "
+                            "This failure pattern is deterministic — retrying the same way "
+                            "will not fix it. Use the fallback directive below."
+                        ),
+                        tool_name=tool_name,
+                        count=effective_streak,
+                        signature=signature,
+                        fallback_directive=directive,
+                    )
+                    self._halt_decision = decision
+                    return decision
+
+            same_tool_halt_eligible = tool_name not in FAILURE_TOLERANT_TOOL_NAMES
+            if (
+                self.config.hard_stop_enabled
+                and same_tool_halt_eligible
+                and effective_streak >= self.config.same_tool_failure_halt_after
+            ):
+                decision = ToolGuardrailDecision(
+                    action="halt",
+                    code="same_tool_failure_halt",
+                    message=(
+                        f"Stopped {tool_name}: it failed {effective_streak} times. "
+                        "Stop retrying the same failing tool path and choose a different approach."
+                    ),
+                    tool_name=tool_name,
+                    count=effective_streak,
+                    signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
+                )
+                self._halt_decision = decision
+                return decision
+
+            if (
+                self.config.warnings_enabled
+                and not throttled
+                and exact_count >= self.config.exact_failure_warn_after
+            ):
+                return ToolGuardrailDecision(
+                    action="warn",
+                    code="repeated_exact_failure_warning",
+                    message=(
+                        f"{tool_name} has failed {exact_count} times with identical arguments. "
+                        "This looks like a loop; inspect the error and change strategy "
+                        "instead of retrying it unchanged."
+                    ),
+                    tool_name=tool_name,
+                    count=exact_count,
+                    signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
+                )
+
+            if (
+                self.config.warnings_enabled
+                and effective_streak >= self.config.same_tool_failure_warn_after
+            ):
+                return ToolGuardrailDecision(
+                    action="warn",
+                    code="same_tool_failure_warning",
+                    message=_tool_failure_recovery_hint(tool_name, effective_streak),
+                    tool_name=tool_name,
+                    count=effective_streak,
+                    signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
+                )
+
+            return ToolGuardrailDecision(
+                tool_name=tool_name, count=exact_count, signature=signature
+            )
 
         self._exact_failure_counts.pop(signature, None)
         self._same_tool_failure_counts.pop(tool_name, None)
-        # A successful mutation is progress for every failing signature still counted
-        # this turn. Pure loops never mutate between attempts, so the replay detector keeps its teeth.
-        if tool_name in PROGRESS_RESET_TOOL_NAMES or file_mutation_result_landed(tool_name, result):
-            self._progress_since_failure.update(dict.fromkeys(self._exact_failure_counts, True))
+        # #1188 — decay (decrement) the cross-turn streak instead of clearing
+        # it. A single success does NOT prove the browser backend recovered:
+        # intermittent successes (navigating to a different, fast-loading
+        # page between failing attempts) kept the old pop() from ever
+        # reaching the cap, allowing 15-deep spirals. Decay by 1 per success
+        # so a genuinely recovered backend (several successes in a row)
+        # drains the streak back to 0, but a failure/success/failure pattern
+        # still accumulates toward the cap and eventually halts.
+        #
+        # #1585 — for spiral-prone tools, the simple 1-success decay was
+        # insufficient: the production terminal spiral is fail → diagnostic-
+        # success (pwd, ls — the fallback directive's own advice) → fail,
+        # which nets 0 per cycle and never reaches the cap. Now we require a
+        # SUSTAINED run of successes (_SUCCESSES_TO_DECAY, default 2) before
+        # draining the streak by 1. A single interspersed success increments
+        # the success-streak but doesn't drain the failure streak, so the
+        # fail/succeed/fail pattern nets +1 per cycle and climbs toward the
+        # cap. A genuine recovery (N consecutive successes) drains it fully.
+        if tool_name in self._cross_turn_tool_failure_counts:
+            current = self._cross_turn_tool_failure_counts[tool_name]
+            is_spiral_prone = tool_name in self.config.spiral_prone_tools
+            # #1826 — once session-hard-stopped, the streak is FROZEN. Decay
+            # would allow the tool back into the rotation and re-open the
+            # spiral. The permanent stop is the whole point.
+            if tool_name in self._session_hard_stopped:
+                pass  # no decay — session stop is irreversible
+            elif is_spiral_prone:
+                succ = self._cross_turn_success_streaks.get(tool_name, 0) + 1
+                if succ >= _successes_needed_to_decay(tool_name):
+                    # Sustained recovery — drain the failure streak by 1.
+                    if current <= 1:
+                        self._cross_turn_tool_failure_counts.pop(tool_name, None)
+                    else:
+                        self._cross_turn_tool_failure_counts[tool_name] = current - 1
+                    # Reset the success streak so the next decay needs another
+                    # sustained run (not a single additional success).
+                    self._cross_turn_success_streaks.pop(tool_name, None)
+                else:
+                    # Not enough consecutive successes yet — remember the
+                    # streak but don't drain the failure count.
+                    self._cross_turn_success_streaks[tool_name] = succ
+            elif current <= 1:
+                self._cross_turn_tool_failure_counts.pop(tool_name, None)
+            else:
+                self._cross_turn_tool_failure_counts[tool_name] = current - 1
+
+        # A successful mutation is progress for every failing signature still
+        # being counted this turn: the next identical retry runs against
+        # changed state, so it is a fresh attempt rather than a replay. Pure
+        # loops never mutate anything between attempts, so the replay detector
+        # keeps its teeth.
+        if tool_name in {"patch", "write_file"} or file_mutation_result_landed(tool_name, result):
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
             self._same_tool_failure_counts.clear()
+            self._cross_turn_tool_failure_counts.pop("terminal", None)
+            self._cross_turn_tool_failure_counts.pop("execute_code", None)
+        elif _is_browser_tool(tool_name) and tool_name != "browser_navigate":
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
+            self._same_tool_failure_counts.clear()
+            self._cross_turn_tool_failure_counts.pop("browser_navigate", None)
+        elif tool_name in PROGRESS_RESET_TOOL_NAMES:
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
+            self._same_tool_failure_counts.clear()
+
         if not self._is_idempotent(tool_name):
             self._no_progress.pop(signature, None)
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
         result_hash = _result_hash(result, tool_name)
         previous = self._no_progress.get(signature)
-        repeat_count = previous[1] + 1 if previous is not None and previous[0] == result_hash else 1
+        repeat_count = 1
+        if previous is not None and previous[0] == result_hash:
+            repeat_count = previous[1] + 1
         self._no_progress[signature] = (result_hash, repeat_count)
-        if warnings and repeat_count >= self.config.no_progress_warn_after:
-            return self._decide("warn", "idempotent_no_progress_warning", tool_name, repeat_count, signature)
-        return ToolGuardrailDecision(tool_name=tool_name, count=repeat_count, signature=signature)
+
+        if (
+            self.config.warnings_enabled
+            and repeat_count >= self.config.no_progress_warn_after
+        ):
+            return ToolGuardrailDecision(
+                action="warn",
+                code="idempotent_no_progress_warning",
+                message=(
+                    f"{tool_name} returned the same result {repeat_count} times. "
+                    "Use the result already provided or change the query instead of "
+                    "repeating it unchanged."
+                ),
+                tool_name=tool_name,
+                count=repeat_count,
+                signature=signature,
+            )
+
+        return ToolGuardrailDecision(
+            tool_name=tool_name, count=repeat_count, signature=signature
+        )
 
     def _is_idempotent(self, tool_name: str) -> bool:
-        return tool_name not in self.config.mutating_tools and tool_name in self.config.idempotent_tools
+        if tool_name in self.config.mutating_tools:
+            return False
+        return tool_name in self.config.idempotent_tools
+
+    def _effective_cap_for(self, tool_name: str) -> int:
+        """Return the effective spiral-failure cap for *tool_name*.
+
+        #1825 — per-tool overrides (e.g. memory=3) take precedence over the
+        default ``spiral_failure_cap`` (5). Non-spiral tools return the
+        default cap but are filtered by membership checks at call sites.
+        """
+        caps = self.config.per_tool_failure_caps
+        if tool_name in caps and caps[tool_name] >= 1:
+            return caps[tool_name]
+        return self.config.spiral_failure_cap
+
+    def observe_identical_call(
+        self,
+        tool_name: str,
+        args: Mapping[str, Any] | None,
+        result: str | None,
+    ) -> str | None:
+        """Track consecutive identical calls; return a loop-breaker notice or None.
+
+        Back-compat wrapper around :meth:`observe_call` for callers that only
+        care about the loop-breaker notice.
+        """
+        return self.observe_call(tool_name, args, result).notice
 
     def observe_call(
-        self, tool_name: str, args: Mapping[str, Any] | None, result: str | None,
-        *, tool_call_id: str = "", failed: bool = False,
-    ) -> IdenticalCallObservation:
+        self,
+        tool_name: str,
+        args: Mapping[str, Any] | None,
+        result: str | None,
+        *,
+        tool_call_id: str = "",
+        failed: bool = False,
+    ) -> "IdenticalCallObservation":
         """Track consecutive identical calls; return notice + dedupe stub info.
 
-        ``notice`` fires from the threshold-th consecutive identical (tool, args, result) call
-        (observational, pollers exempt). ``stub`` replaces the CURRENT result from the 2nd byte-identical
-        repeat — the tool still executed, only the context representation is deduplicated, so polling
-        semantics survive; pollers are NOT exempt here since an unchanged poll is where it saves most.
+        Two independent outputs from the same consecutive-streak tracker:
+
+        - ``notice``: the compact loop-breaker notice, fired when the SAME
+          tool is called with identical canonical arguments AND returns an
+          identical result for the ``STALL_GUARD_IDENTICAL_CALL_THRESHOLD``-th
+          (and every subsequent) consecutive time within the turn. Purely
+          observational — never blocks the call. Allowlisted pollers
+          (``is_stall_guard_repeatable``) are exempt from the NOTICE.
+        - ``stub``: a short reference replacement for the CURRENT result,
+          produced from the 2nd consecutive identical call whose fresh result
+          is byte-identical to the previous one. The tool still executed —
+          only the context representation is deduplicated, so polling
+          semantics are preserved (a changed result flows through whole and
+          resets the streak). Pollers are NOT exempt from stubbing: for a
+          poller, an identical result means nothing changed, which is exactly
+          when the stub saves the most context and loses nothing. Results
+          under ``IDENTICAL_RESULT_STUB_MIN_CHARS`` and failed/error results
+          are never stubbed, and only plain-string results are considered.
+
+        Any intervening different call or changed result resets the streak.
+        Callers substitute/append at tool RESULT construction time, which is
+        cache-safe: tool results are append-only and never mutate
+        already-sent context.
         """
         is_plain_str = isinstance(result, str)
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
         result_hash = _result_hash(result, tool_name) if is_plain_str else ""
 
-        if is_plain_str and (signature, result_hash) == (self._identical_streak_sig, self._identical_streak_result_hash):
+        if (
+            is_plain_str
+            and self._identical_streak_sig == signature
+            and self._identical_streak_result_hash == result_hash
+        ):
             self._identical_streak_count += 1
         else:
-            # New streak; non-string (multimodal) results never form one.
+            # New streak (or non-string result, which never forms a streak —
+            # multimodal content lists pass through untouched).
             self._identical_streak_sig = signature if is_plain_str else None
             self._identical_streak_result_hash = result_hash
             self._identical_streak_count = 1 if is_plain_str else 0
             self._identical_streak_first_call_id = tool_call_id or ""
+
         count = self._identical_streak_count
 
         notice = kind = None

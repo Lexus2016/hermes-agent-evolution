@@ -642,6 +642,13 @@ _FLAKY_RESULTS: list[tuple[Path, str]] = []
 _flaky_lock = threading.Lock()
 
 
+def _reclaim_own_basetemp(own_basetemp: str | None) -> None:
+    """Drop the per-file --basetemp tree this attempt created (fork-side isolation:
+    one root per file, so a concurrent process cannot unlink another's symlink)."""
+    if own_basetemp:
+        shutil.rmtree(own_basetemp, ignore_errors=True)
+
+
 def _run_one_file_once(
     file: Path,
     pytest_args: list[str],
@@ -649,6 +656,12 @@ def _run_one_file_once(
     file_timeout: float,
 ) -> tuple[Path, int, str, dict[str, int], float]:
     """Single attempt of a per-file pytest subprocess (see _run_one_file)."""
+    own_basetemp: str | None = None
+    if not any(
+        a == "--basetemp" or a.startswith("--basetemp=") for a in pytest_args
+    ):
+        own_basetemp = tempfile.mkdtemp(prefix="pytest-rtp-")
+        pytest_args = [*pytest_args, "--basetemp", own_basetemp]
 
     # Give this subprocess its own pytest temp root.
     #
@@ -694,7 +707,7 @@ def _run_one_file_once(
         # KeyboardInterrupt / runner crash — make sure no zombie
         # grandchildren outlive us.
         _kill_tree(proc, pgid=pgid)
-        _reclaim_basetemp()
+        _reclaim_own_basetemp(own_basetemp)
         raise
     else:
         # Happy path: pytest exited on its own. Kill the group anyway in
@@ -740,7 +753,7 @@ def _run_one_file_once(
     # and mid-run interrupt) reclaim before re-raising. CI runners are
     # ephemeral, but local runs would otherwise accumulate one tree per
     # file per invocation.
-    _reclaim_basetemp()
+    _reclaim_own_basetemp(own_basetemp)
     return file, rc, output, summary, subproc_wall
 
 

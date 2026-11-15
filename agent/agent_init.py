@@ -1158,10 +1158,46 @@ def _apply_display_config(agent, _agent_cfg, platform):
     agent._stream_5xx_probe_ts = None  # monotonic time of the last streaming-5xx unmask probe
 
     try:
+        from agent.policy_interceptors import (
+            RegisteredPolicy,
+            build_registry_from_config,
+        )
+        from agent.write_guard import WriteGuardPolicy, make_write_guard
+
+        _policy_registry = build_registry_from_config(
+            _agent_cfg.get("policy_interceptors", {})
+        )
+        _raw_wg = getattr(agent, "write_guard_policy", None) or _agent_cfg.get(
+            "write_guard", {}
+        )
+        _wg_policy = (
+            _raw_wg
+            if isinstance(_raw_wg, WriteGuardPolicy)
+            else WriteGuardPolicy.from_mapping(_raw_wg)
+        )
+        if _wg_policy.enabled:
+            _policy_registry._policies.append(
+                RegisteredPolicy(
+                    name="write_guard",
+                    interceptor=make_write_guard(_wg_policy),
+                )
+            )
+        agent._write_guard_policy = _wg_policy
+
+        # #1041 — recheck-suppression controller (off by default). Passed to the
+        # guardrail so before_call can suppress a single redundant read-only
+        # recheck when ``recheck_suppression.enabled`` is set.
+        from agent.recheck_suppression import RecheckController
+
+        _recheck_controller = RecheckController.from_mapping(
+            _agent_cfg.get("recheck_suppression", {})
+        )
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
                 _agent_cfg.get("tool_loop_guardrails", {}), platform=platform,
-            )
+            ),
+            policy_registry=_policy_registry,
+            recheck_controller=_recheck_controller,
         )
     except Exception as _tlg_err:
         _ra().logger.warning("Tool loop guardrail config ignored: %s", _tlg_err)
@@ -2175,6 +2211,7 @@ def init_agent(
     checkpoint_max_snapshots: int = 20, checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10, pass_session_id: bool = False,
     requested_provider: str | None = None, capabilities: Optional[dict[str, bool]] = None, cwd: Optional[str] = None,
+    write_guard_policy: Any = None,
     side_agent: bool = False, memory_manager=None, memory_agent_context: str | None = None,
     tool_result_metadata_callback: Optional[Callable[..., dict]] = None,
 ):
@@ -2193,6 +2230,8 @@ def init_agent(
     for _name in _GATEWAY_IDENTITY_PARAMS:
         setattr(agent, f"_{_name}", _params[_name])
     agent.session_cwd = cwd or None
+    if write_guard_policy is not None:
+        agent.write_guard_policy = write_guard_policy
     # Shared iteration budget: parent creates, children inherit.
     agent.iteration_budget = iteration_budget or IterationBudget(max_iterations)
     # CLI replaces this with _cprint so raw ANSI status lines go through prompt_toolkit's
