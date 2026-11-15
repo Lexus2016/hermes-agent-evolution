@@ -922,6 +922,41 @@ def _refresh_bot_chat_tools(agent) -> None:
                        agent.session_id, exc)
 
 
+_EXPERIENCE_BLOCK_HEADING = "## Learned execution patterns"
+_EXPERIENCE_PATTERN_LINE = re.compile(
+    r"^- \[[^\]\r\n]+\] .+ \(evidence: [1-9][0-9]*\)$"
+)
+
+
+def _restore_experience_block_from_prompt(agent, stored_prompt: str) -> None:
+    """Restore the session's exact experience snapshot from its stored prompt.
+
+    Відновлює точний знімок досвіду сеансу зі збереженого промпту.
+
+    A legacy prompt without the block freezes an empty snapshot. This prevents
+    a later compression rebuild from injecting patterns learned after the
+    session started while keeping the persisted prompt schema unchanged.
+
+    Старий промпт без блока фіксує порожній знімок. Тому пізніше перезбирання
+    після стиснення не додасть шаблони, вивчені вже після початку сеансу.
+    """
+    if not vars(agent).get("_experience_injection", False):
+        return
+
+    restored_block = ""
+    for section in stored_prompt.split("\n\n"):
+        lines = section.splitlines()
+        if (
+            len(lines) > 1
+            and lines[0] == _EXPERIENCE_BLOCK_HEADING
+            and all(_EXPERIENCE_PATTERN_LINE.fullmatch(line) for line in lines[1:])
+        ):
+            restored_block = section
+            break
+
+    agent._experience_block = restored_block
+
+
 def _restore_or_build_system_prompt(agent, system_message, conversation_history):
     """Restore the cached system prompt from the session DB or build it fresh.
 
@@ -1921,6 +1956,13 @@ def _run_conversation_turn(
     )
     if (early_result := _turn_without_loop(agent, s, _ctx.plugin_block_message)) is not None:
         return early_result
+
+    # Pre-flight provider/model validation (#929): one check per turn, before the
+    # first provider request, so an unresolvable model never burns a round trip.
+    if moa_config is None:
+        _preflight_result = _preflight_model_validation_result(agent, s.messages)
+        if _preflight_result is not None:
+            return _preflight_result
 
     _prelude_action, _prelude_result = play_prelude(agent, s, prelude)
     if _prelude_action == "return":
