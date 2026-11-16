@@ -76,8 +76,27 @@ def _prompt_embedded_llm(llm_provider: str, provider_config: dict, env_writes: d
     env_writes["HINDSIGHT_LLM_API_KEY"] = llm_key or _load_simple_env(hermes_env).get("HINDSIGHT_LLM_API_KEY", "")
 
 
+def _missing_dependencies(mode: str) -> list[str]:
+    """Declared Hindsight requirements this interpreter cannot import."""
+    import importlib.util
+
+    if mode == "local_embedded":
+        wanted = [("hindsight", "hindsight-all")]
+    else:
+        wanted = [("hindsight_client", f"hindsight-client>={_MIN_CLIENT_VERSION}")]
+    missing = []
+    for module, spec in wanted:
+        try:
+            present = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            present = False
+        if not present:
+            missing.append(spec)
+    return missing
+
+
 def run_setup(provider, hermes_home: str, config: dict) -> None:
-    """Interactive wizard — installs only the deps the selected mode needs."""
+    """Interactive wizard — checks the deps the selected mode needs and writes config."""
     from hermes_cli.config import save_config
 
     from . import _load_config
@@ -105,18 +124,16 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
         provider_config["llm_provider"] = llm_provider
 
     print("\n  Checking dependencies...")
-    # Environment-aware install: sealed hosted venvs redirect to the durable data volume.
-    from tools.lazy_deps import install_specs
-
+    # PM owns dependency installation for a declared plugin: the wizard reports what
+    # is missing and how to get it, and never installs at runtime (see plugin.yaml).
     deps = ["hindsight-all"] if mode == "local_embedded" else [f"hindsight-client>={_MIN_CLIENT_VERSION}"]
-    outcome = install_specs(deps, timeout=120)
-    if outcome.ok:
-        print("  ✓ Dependencies up to date")
-    elif outcome.blocked:
-        print(f"  ⚠ Cannot install dependencies: {outcome.reason}")
+    missing = _missing_dependencies(mode)
+    if not missing:
+        print("  ✓ Dependencies present")
     else:
-        print(f"  ⚠ Install failed:\n{(outcome.stderr or '').strip()}")
-        print(f"  Run manually: uv pip install --python {sys.executable} {' '.join(deps)}")
+        print(f"  ⚠ Missing: {', '.join(missing)}")
+        print("    For an enabled plugin, run `hermes pm repair`, then restart Hermes;")
+        print(f"    for a one-off install: uv pip install --python {sys.executable} {' '.join(deps)}")
 
     if mode == "cloud":
         print("\n  Get your API key at https://ui.hindsight.vectorize.io\n")

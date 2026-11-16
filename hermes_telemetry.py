@@ -78,12 +78,16 @@ def _ensure_init() -> None:
     if not cfg.get("enabled", False):
         _ENABLED = False
         return
-    # Opt-in backend: lazy-install OTel at first enabled use (prompt=False so a
-    # cron tick never blocks on input()). Any failure degrades to no-op below.
+    # Opt-in backend: PM owns the [otlp] extra, so this asks for it once at first
+    # enabled use and never prompts an interactive input() (a cron tick has no
+    # terminal). Any failure degrades to the no-op below.
     try:
-        from tools import lazy_deps
+        from pm.extras import ensure_import, suppress_interactive_install_prompts
 
-        lazy_deps.ensure("telemetry.otel", prompt=False)
+        # Telemetry is opt-in config, so it never stops a turn for an input():
+        # the old path passed prompt=False for the same reason.
+        with suppress_interactive_install_prompts():
+            ensure_import("otlp")
     except Exception:
         pass
     try:
