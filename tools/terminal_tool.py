@@ -1179,7 +1179,7 @@ def _preflight_check(
 
 
 from tools.terminal_tool_guards import (
-    _foreground_background_guidance, _safe_command_preview, _validate_workdir,
+    _foreground_background_guidance, _safe_command_preview, _strip_quotes, _validate_workdir,
     gateway_lifecycle_block, locked_skill_block, self_repo_block, trailing_amp_background_command,
 )
 from tools.terminal_tool_background import _YIELDED_NOTE, spawn_background_process, yield_to_background_handler
