@@ -25,10 +25,10 @@ concurrency:
 jobs:
   attach:
     name: Desktop attach to a running local gateway (Windows)
-    runs-on: blacksmith-32vcpu-windows-2025
+    runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a  # v1
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
 
       - name: Prepare locked Desktop build and test toolchain
         id: pm
