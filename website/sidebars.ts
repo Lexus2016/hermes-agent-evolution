@@ -167,6 +167,15 @@ const sidebars: SidebarsConfig = {
               items: [
                 {
                   type: 'category',
+                  label: 'a2a',
+                  key: 'skills-bundled-a2a',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/a2a/a2a-a2a',
+                  ],
+                },
+                {
+                  type: 'category',
                   label: 'apple',
                   key: 'skills-bundled-apple',
                   collapsed: true,
@@ -227,11 +236,37 @@ const sidebars: SidebarsConfig = {
                 },
                 {
                   type: 'category',
+                  label: 'evolution',
+                  key: 'skills-bundled-evolution',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/evolution/evolution-evolution-analysis',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-extract',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-implementation',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-integration',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-introspection',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-issues',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-orchestrator',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-research',
+                    'user-guide/skills/bundled/evolution/evolution-evolution-upstream-sync',
+                  ],
+                },
+                {
+                  type: 'category',
                   label: 'media',
                   key: 'skills-bundled-media',
                   collapsed: true,
                   items: [
                     'user-guide/skills/bundled/media/media-youtube-content',
+                  ],
+                },
+                {
+                  type: 'category',
+                  label: 'memory-consolidation',
+                  key: 'skills-bundled-memory-consolidation',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/memory-consolidation/memory-consolidation-memory-consolidation',
                   ],
                 },
                 {
@@ -249,10 +284,13 @@ const sidebars: SidebarsConfig = {
                   key: 'skills-bundled-productivity',
                   collapsed: true,
                   items: [
+                    'user-guide/skills/bundled/productivity/productivity-adhd-output',
                     'user-guide/skills/bundled/productivity/productivity-document-to-action-items',
                     'user-guide/skills/bundled/productivity/productivity-google-workspace',
+                    'user-guide/skills/bundled/productivity/productivity-gui-automation',
                     'user-guide/skills/bundled/productivity/productivity-maps',
                     'user-guide/skills/bundled/productivity/productivity-meeting-action-items',
+                    'user-guide/skills/bundled/productivity/productivity-memory-audit',
                     'user-guide/skills/bundled/productivity/productivity-microsoft-office',
                     'user-guide/skills/bundled/productivity/productivity-pdf',
                     'user-guide/skills/bundled/productivity/productivity-product-price-monitor',
@@ -273,6 +311,16 @@ const sidebars: SidebarsConfig = {
                 },
                 {
                   type: 'category',
+                  label: 'security',
+                  key: 'skills-bundled-security',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/security/security-ai-safe-audit',
+                    'user-guide/skills/bundled/security/security-skill-audit',
+                  ],
+                },
+                {
+                  type: 'category',
                   label: 'social-media',
                   key: 'skills-bundled-social-media',
                   collapsed: true,
@@ -289,6 +337,7 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/software-development/software-development-codebase-inspection',
                     'user-guide/skills/bundled/software-development/software-development-dogfood',
                     'user-guide/skills/bundled/software-development/software-development-github',
+                    'user-guide/skills/bundled/software-development/software-development-predict-then-act',
                     'user-guide/skills/bundled/software-development/software-development-requesting-code-review',
                     'user-guide/skills/bundled/software-development/software-development-simplify-code',
                     'user-guide/skills/bundled/software-development/software-development-spike',
@@ -543,6 +592,15 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/optional/productivity/productivity-shop',
                     'user-guide/skills/optional/productivity/productivity-siyuan',
                     'user-guide/skills/optional/productivity/productivity-telephony',
+                  ],
+                },
+                {
+                  type: 'category',
+                  label: 'quality',
+                  key: 'skills-optional-quality',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/optional/quality/quality-self-critique',
                   ],
                 },
                 {
