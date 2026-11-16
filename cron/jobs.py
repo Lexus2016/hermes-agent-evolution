@@ -2139,8 +2139,11 @@ def create_job(
     workdir: Optional[str] = None,
     no_agent: bool = False,
     attach_to_session: Optional[bool] = None,
+    approval_mode: Optional[str] = None,
+    delivery_verbosity: Optional[str] = None,
     monitor_script: Optional[str] = None,
     monitor_url: Optional[str] = None,
+    pin_inference: bool = False,
     reasoning_effort: Optional[str] = None,
     failure_deliver: Optional[str] = None,
     catch_up: Optional[bool] = None,
@@ -2150,6 +2153,7 @@ def create_job(
     interpreter: Optional[str] = None,
     timezone: Optional[str] = None,
     grace_minutes: Optional[int] = None,
+    decision: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Create a new cron job and return the stored record.
 
@@ -2160,7 +2164,9 @@ def create_job(
     source run FIRST each tick; unchanged output suppresses the agent run (mutually exclusive,
     incompatible with ``no_agent``). reasoning_effort: per-job pin; capability NOT validated.
     interpreter: absolute/``~`` Python for ``.py`` script/monitor_script, validated at run time
-    (a venv can be rebuilt or moved after creation). timezone: IANA key pinning the schedule's
+    (a venv can be rebuilt or moved after creation). approval_mode/delivery_verbosity: per-job
+    pins persisted only when set. pin_inference: fill an unset provider/model from the caller's
+    live inference instead of snapshotting it. timezone: IANA key pinning the schedule's
     wall clock (None/'' = inherit the profile zone). grace_minutes: catch-up window override
     (0 = never catch up)."""
     if not isinstance(paused, bool):
@@ -2207,6 +2213,17 @@ def create_job(
     name = name or label_source[:50].strip()
     if pinned and not f["model"]:
         f["provider"], f["model"] = _main_model_pin()
+    provider_snapshot, model_snapshot = _compute_provider_model_snapshots(
+        provider=f["provider"], model=f["model"], base_url=f["base_url"], no_agent=f["no_agent"])
+
+    if pin_inference and not f["no_agent"]:
+        if f["provider"] is None and provider_snapshot:
+            f["provider"] = provider_snapshot
+            provider_snapshot = None
+        if f["model"] is None and model_snapshot:
+            f["model"] = model_snapshot
+            model_snapshot = None
+
     next_run_at = _next_run_or_reject_past_oneshot(
         parsed_schedule, name, schedule, "", f["timezone"])
 
@@ -2255,13 +2272,19 @@ def create_job(
     # config (attach/reasoning) or to ``deliver`` (failure_deliver), byte-identical to pre-feature
     # jobs.
     for key, value in (
-        ("attach_to_session", normalized_attach), ("reasoning_effort", normalized_reasoning_effort),
+        ("attach_to_session", normalized_attach),
+        ("approval_mode", normalized_approval),
+        ("delivery_verbosity", normalized_delivery_verbosity),
+        ("reasoning_effort", normalized_reasoning_effort),
         ("failure_deliver", f["failure_deliver"]), ("interpreter", f["interpreter"]),
         ("timezone", f["timezone"]), ("grace_minutes", f["grace_minutes"]),
         ("catch_up", f["catch_up"]),
     ):
         if value is not None:
             job[key] = value
+
+    from cron.decision_ledger import capture
+    job["decision_ledger"] = capture(decision, workdir=job.get("workdir"))
 
     with _jobs_lock():
         save_jobs(load_jobs() + [job])

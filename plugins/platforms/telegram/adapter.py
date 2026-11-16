@@ -188,6 +188,7 @@ from plugins.platforms.telegram.telegram_polling_probe import TelegramPendingPro
 from plugins.platforms.telegram.telegram_intake import effective_update_message
 from plugins.platforms.telegram.telegram_media_group import add_item_note, flush_media_group_event, queue_media_group_event, tracking_album_items
 from plugins.platforms.telegram.telegram_media_flood import TelegramMediaFloodMixin
+from plugins.platforms.telegram.send_pacer import TelegramSendPacer
 from plugins.platforms.telegram import telegram_flood_window as _flood_window
 from plugins.platforms.telegram.telegram_ids import normalize_telegram_chat_id, parse_send_target, parse_telegram_message_id
 from plugins.platforms.telegram.telegram_resolved_prompt import edit_keeping_prompt
@@ -3844,6 +3845,40 @@ class TelegramAdapter(TelegramContactMixin, TelegramHeldInboundMixin, TelegramRe
                 logger.warning("[%s] Overflow continuation send failed: %s", self.name, _redact_telegram_error_text(send_err))
                 return None
         return None
+
+    def _chunks_for_send(self, content: str) -> "tuple[List[str], List[str]]":
+        """``(raw_chunks, wire_chunks)`` for a ``send()`` payload.
+
+        Chunking the RAW text (the split ``_edit_overflow_split`` already uses) keeps every chunk
+        boundary a *content* offset, so a send that dies after some chunks landed can name its
+        undelivered tail instead of forcing the caller to re-send from chunk 1 — the head chunks are
+        already on screen. ``raw_chunks`` comes back empty when MarkdownV2 escaping inflated a raw
+        chunk past the cap: delivery falls back to chunking the formatted text and only the resume
+        hint is lost.
+        """
+        formatted = self.format_message(content)
+        wire = self.truncate_message(formatted, self.MAX_MESSAGE_LENGTH, len_fn=utf16_len)
+        if len(wire) <= 1:
+            return [content], wire
+        # Split payload: redo the split on the RAW text, discounting the cap by the escaping
+        # inflation measured on this payload so the raw chunks still fit once formatted
+        # (truncate_message already reserves room for the "(1/3)" indicator).
+        raw_len = utf16_len(content) or 1
+        inflation = max(1.0, utf16_len(formatted) / raw_len)
+        # _INDICATOR_ESCAPE_COST: truncate_message reserves 10 units for " (12/34)", but MarkdownV2
+        # escaping turns its parentheses into "\(" / "\)" — 2 units the reserve does not cover.
+        headroom = max(32, self.MAX_MESSAGE_LENGTH - _INDICATOR_ESCAPE_COST)
+        budget = max(32, min(headroom, int(headroom / inflation)))
+        raw_chunks = self.truncate_message(content, budget, len_fn=utf16_len)
+        raw_wire = [_separate_chunk_indicator_from_fence(self.format_message(c)) for c in raw_chunks]
+        if len(raw_chunks) > 1 and all(utf16_len(w) <= self.MAX_MESSAGE_LENGTH for w in raw_wire):
+            return raw_chunks, raw_wire
+        # Escaping is locally denser than the payload average: keep the formatted split, which is
+        # measured against the real cap, and give up the resume hint for this message.
+        return [], [
+            _separate_chunk_indicator_from_fence(re.sub(r" \((\d+)/(\d+)\)$", r" \\(\1/\2\\)", chunk))
+            for chunk in wire
+        ]
 
     async def _edit_overflow_split(
         self, chat_id: str, message_id: str, content: str, *, finalize: bool, metadata: Optional[dict[str, Any]] = None) -> SendResult:

@@ -5336,8 +5336,10 @@ from cron.scheduler_prompt import (
     _job_doc_header, _parse_wake_gate,
 )
 from cron.scheduler_preflight import (
+    BALANCE_LOW_MARKER, BALANCE_LOW_SILENT_MARKER,
     BLOCKED_CONFIG_MARKER, BLOCKED_CONFIG_SILENT_MARKER, _cron_preflight_enabled,
     _empty_requested_mcp_toolsets, _is_transient_provider_resolve_error, _preflight_job_config,
+    _preflight_check_provider_balance, _preflight_check_provider_key,
 )
 
 
