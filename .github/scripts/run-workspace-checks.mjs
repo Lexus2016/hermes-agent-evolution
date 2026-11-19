@@ -97,6 +97,36 @@ async function main() {
     return
   }
 
+  // Sharding: a GitHub-hosted 4-core runner runs the whole payload in one job
+  // and outgrew the job timeout. ``--shard k/n`` takes every n-th unit starting
+  // at k, so a matrix of n legs covers the payload once with no overlap. The
+  // selection is by discovery order, so a new package or check script still
+  // lands in exactly one leg without touching the workflow.
+  const shardIdx = argv.indexOf('--shard')
+  if (shardIdx !== -1) {
+    const spec = String(argv[shardIdx + 1] || '')
+    const m = spec.match(/^(\d+)\/(\d+)$/)
+    if (!m) {
+      console.error(`::error::--shard expects k/n, got '${spec}'`)
+      process.exit(1)
+    }
+    const k = Number(m[1])
+    const n = Number(m[2])
+    if (n < 1 || k < 0 || k >= n) {
+      console.error(`::error::--shard k/n out of range: ${spec}`)
+      process.exit(1)
+    }
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      if (i % n !== k) units.splice(i, 1)
+    }
+    console.log(`shard ${k}/${n}: ${units.length} checks`)
+    if (units.length === 0) {
+      // An empty leg would report green having run nothing.
+      console.error(`::error::shard ${k}/${n} selected no checks`)
+      process.exit(1)
+    }
+  }
+
   const flagIdx = argv.indexOf('--concurrency')
   const concurrency = Math.max(
     1,

@@ -22,6 +22,14 @@ jobs:
     # outgrows the timeout here, split it back into a matrix instead of raising
     # the ceiling.
     runs-on: ubuntu-latest
+    # Two shards: the single job's payload outgrew the 30-minute timeout on a
+    # 4-core GitHub-hosted runner (30m17s, cancelled). Per the note above, the
+    # payload is split instead of raising the ceiling. ``--shard k/2`` takes
+    # every second discovered check, so both legs together cover it once.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -133,8 +141,8 @@ jobs:
       # ``check:*`` script needs no change here. An empty list is an error and
       # not an empty run, because an empty run reports green after it checks
       # nothing.
-      - name: Run all workspace checks
-        run: just check-js-ci
+      - name: Run workspace checks (shard ${{ matrix.shard }}/2)
+        run: node .github/scripts/run-workspace-checks.mjs --shard ${{ matrix.shard }}/2
       - name: Check the checkout is clean
         # Last step of every job (tests/ci/test_clean_worktree_check.py): a test or CI step that
         # leaves an untracked or modified file in the checkout is reported here. Runs only when
