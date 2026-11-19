@@ -392,6 +392,7 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/gateway_multiplex_mode.py",
     "hermes_cli/plugin_catalog.py",
     "hermes_cli/plugins_auto_update.py",  # update_cmd_maint's catalog-pin notice after the code swap
+    "hermes_cli/tqmemory_setup.py",  # update_cmd_maint's reconcile_tqmemory on every update
     "hermes_cli/steward.py",
     "hermes_cli/observability/shared_metrics_update.py",
     "hermes_cli/main_install_repair.py",

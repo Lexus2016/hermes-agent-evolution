@@ -193,12 +193,23 @@ class _Parser:
         raise Unsupported(f"function {name}() in {self.text!r}")
 
     def lookup(self, path: str) -> Any:
-        node: Any = self.ctx
-        for part in path.split("."):
-            if part == "*":
-                raise Unsupported(f"object filter in {self.text!r}")
-            node = node.get(part) if isinstance(node, Mapping) else None
-        return node
+        return _select(self.ctx, path.split("."))
+
+
+def _select(node: Any, parts: list[str]) -> Any:
+    """A property path with GitHub's ``*`` object filter (``labels.*.name``).
+
+    ``*`` maps the remaining path over an array and drops the null results;
+    on a non-array it is ``null``, the same as any other missing property.
+    """
+    for index, part in enumerate(parts):
+        if part == "*":
+            rest = parts[index + 1:]
+            if not isinstance(node, list):
+                return None
+            return [picked for picked in (_select(item, rest) for item in node) if picked is not None]
+        node = node.get(part) if isinstance(node, Mapping) else None
+    return node
 
 
 def evaluate(expr: str, context: Mapping[str, Any]) -> Any:

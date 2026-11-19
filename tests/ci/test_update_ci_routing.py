@@ -149,7 +149,12 @@ def _run_workflow(rel: str, *, inputs: dict[str, Any], detect: dict[str, Any] | 
             all_ran = all(n in ran for n in needs)
             ctx = {
                 "inputs": inputs,
-                "github": {"event_name": "pull_request", "ref_type": "branch"},
+                # The replay models the fork's `run-os-tests` label as applied.
+                # Fork #3450 gates the OS lanes on that label to keep queue time
+                # down; it is a cost switch, not a routing rule, so the routing
+                # assertions below ask whether a set lane reaches its suite.
+                "github": {"event_name": "pull_request", "ref_type": "branch",
+                           "event": {"pull_request": {"labels": [{"name": "run-os-tests"}]}}},
                 "needs": {n: {"outputs": (ran.get(n) or {}).get("outputs", {}),
                               "result": "success" if n in ran else "skipped"} for n in needs},
                 "__status__": {"always": True, "success": all_ran, "failure": False, "cancelled": False},
