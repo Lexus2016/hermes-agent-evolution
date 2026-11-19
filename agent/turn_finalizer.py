@@ -593,31 +593,18 @@ def public_pre_transform(agent, pre_transform: Optional[Any]) -> Optional[Any]:
 
 
 def _mirror_turn_to_memory(
-    agent, *, original_user_message, final_response, interrupted, messages, review_memory, review_skills, vetoed,
+    agent, *, original_user_message, final_response, interrupted, messages, vetoed,
 ) -> None:
-    """External-memory sync (+ next prefetch), then the background memory/skill review. A prompt a
-    ``pre_llm_call`` hook vetoed never leaves the host, so neither runs for that turn."""
+    """External-memory sync (+ next prefetch). A prompt a ``pre_llm_call`` hook vetoed never leaves
+    the host, so nothing runs for that turn. The background memory/skill review is decided
+    separately, by ``decide_correction_review`` — it has to fire on the interrupted/denied turns
+    the old healthy-completion gate here dropped."""
     if vetoed:
         return
     agent._sync_external_memory_for_turn(
         original_user_message=original_user_message, final_response=final_response,
         interrupted=interrupted, messages=messages,
     )
-    # Background memory/skill review runs AFTER delivery so it never competes with the
-    # user's task. Suppressed by skip_background_review (e.g. cron): the fork costs
-    # ~30K tokens / event with no human-in-the-loop benefit. Best-effort; the review
-    # clones the snapshot structurally so its sanitizers can't reach the live transcript.
-    if (
-        final_response
-        and not interrupted
-        and not getattr(agent, "skip_background_review", False)
-        and (review_memory or review_skills)
-    ):
-        with suppress(Exception):
-            agent._spawn_background_review(
-                messages_snapshot=list(messages), review_memory=review_memory,
-                review_skills=review_skills,
-            )
 
 
 def finalize_turn(
@@ -886,9 +873,50 @@ def finalize_turn(
 
     _mirror_turn_to_memory(
         agent, original_user_message=original_user_message, final_response=final_response,
-        interrupted=interrupted, messages=messages, review_memory=_should_review_memory,
-        review_skills=_should_review_skills, vetoed=vetoed,
+        interrupted=interrupted, messages=messages, vetoed=vetoed,
     )
+
+    # Detect a structured user correction on this turn (INTERRUPT / DENY / STEER) and decide
+    # whether to spawn the background memory/skill review. Shared with the Codex-runtime
+    # finalizer (``agent/codex_runtime.py``) through ``agent/correction_review.py`` so the two
+    # runtimes cannot drift.
+    #
+    # Detection + recording (the deterministic CorrectionLearner via
+    # ``agent._record_turn_correction``) ALWAYS runs when a correction is present — the
+    # highest-signal feedback the agent gets, including the loud interrupted/denied turns the
+    # legacy ``not interrupted`` gate dropped.
+    #
+    # The LLM review fork runs AFTER the response is delivered so it never competes with the
+    # user's task. It is spawned ONLY when a nudge counter fired (the legacy healthy-completion
+    # path) OR the correction was promoted to DURABLE. A pure-transient correction with no nudge
+    # is recorded deterministically but does NOT spawn the fork — the fork would be barred from
+    # durable writes anyway (X1), so it would burn an aux-model call for nothing. When the fork
+    # DOES spawn for an unpromoted correction (because a nudge co-occurred), X1 strips its
+    # durable writers universally.
+    if not vetoed:
+        from agent.correction_review import decide_correction_review
+
+        _review_decision = decide_correction_review(
+            agent,
+            final_text=final_response,
+            interrupted=interrupted,
+            messages=messages,
+            interrupt_message=_captured_interrupt,
+            turn_exit_reason=_turn_exit_reason,
+            should_review_memory=_should_review_memory,
+            should_review_skills=_should_review_skills,
+        )
+        if _review_decision["spawn"]:
+            with suppress(Exception):
+                # _spawn_background_review clones the snapshot structurally so the fork's
+                # in-place sanitizers can't reach the live transcript.
+                agent._spawn_background_review(
+                    messages_snapshot=list(messages),
+                    review_memory=_review_decision["review_memory"],
+                    review_skills=_review_decision["review_skills"],
+                    correction_hint=_review_decision["correction_hint"],
+                    block_durable_writes=_review_decision["block_durable_writes"],
+                )
 
     # Opt-in (compression.prepare_ahead): near the trigger, write the next compaction summary
     # between turns. No-op otherwise; never raises. Not after a vetoed turn (no model calls).
