@@ -685,18 +685,49 @@ class MemoryStore:
             os.close(raw_fd)
             raise
         with fd:
-            def _flock(unlock: bool):
+            try:
                 if fcntl:
-                    fcntl.flock(fd, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX)
+                    MemoryStore._acquire_fcntl_lock(fd)
                 else:
                     fd.seek(0)
-                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK if unlock else msvcrt.LK_LOCK, 1)
-            _flock(False)
-            try:
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
                 yield
             finally:
-                with suppress(OSError):
-                    _flock(True)
+                with suppress(OSError, IOError):
+                    if fcntl:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    elif msvcrt:
+                        fd.seek(0)
+                        msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+
+    @staticmethod
+    def _acquire_fcntl_lock(fd, timeout: Optional[float] = None) -> None:
+        """Acquire an exclusive flock with bounded retry and backoff.
+
+        Uses LOCK_EX | LOCK_NB (non-blocking) in a retry loop with
+        exponential backoff (0.05s, 0.1s, 0.2s, ...). Raises TimeoutError
+        if the lock isn't acquired within *timeout* seconds.
+        """
+        from tools import memory_tool as _mt  # tests patch fcntl here
+        fcntl = _mt.fcntl
+        timeout = timeout if timeout is not None else MemoryStore._LOCK_TIMEOUT_SECONDS
+        deadline = time.monotonic() + timeout
+        wait = 0.05
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return  # acquired
+            except (OSError, IOError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Could not acquire memory file lock within "
+                        f"{timeout:.0f}s — another process may hold it. "
+                        f"Lock file: {fd.name}"
+                    )
+                sleep_time = min(wait, remaining)
+                time.sleep(sleep_time)
+                wait = min(wait * 2, 1.0)  # cap at 1s per attempt
 
     @staticmethod
     def _path_for(target: str) -> Path:

@@ -145,11 +145,10 @@ def test_memory_save_and_load_under_lock(tmp_path):
     from tools.memory_tool import MemoryStore
 
     store = MemoryStore()
-    store.add("memory", "test entry one")
-    store.save_to_disk("memory")
+    store.add("memory", "test entry one")  # every mutation persists under the lock
 
     store2 = MemoryStore()
-    store2._reload_target("memory")
+    store2.load_from_disk()
     entries = store2._entries_for("memory")
     assert "test entry one" in entries
 

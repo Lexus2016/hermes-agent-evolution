@@ -255,6 +255,10 @@ class MemoryManager:
         # construction path keeps writing.
         self._agent_context = "primary"
         self._tool_call_keywords_cache: dict[int, Optional[frozenset[str]]] = {}
+        # Contradiction de-duplication for check_contradictions() (#908): a key is
+        # (claim, importance bucket), bounded so a long session cannot grow it.
+        self._contradiction_seen: set[tuple[str, int]] = set()
+        self._contradiction_seen_cap = 8192
 
     def _each_provider(self, label: str, call: Callable[[MemoryProvider], Any], *, level: int = logging.DEBUG,
                        providers: Optional[list[MemoryProvider]] = None, exc_info: bool = False) -> list[Any]:
@@ -610,6 +614,96 @@ class MemoryManager:
             signals,
         )
         return event
+
+    # -- Staleness detection (#797) ------------------------------------------
+
+    @staticmethod
+    def _entries_to_notes(entries: List[str], *, target: str) -> List["Note"]:
+        """Convert built-in memory-store entries to staleness :class:`Note` objects.
+
+        The built-in store keeps entries as plain strings (delimited by ``§``)
+        with no per-entry id/timestamp metadata. Each entry is mapped to a
+        :class:`~agent.memory_staleness.Note` using the entry index as a stable
+        id, the first non-empty line as the title, and the remainder as the
+        body content. The ``target`` (``"memory"``/``"user"``) is recorded as
+        the note ``kind`` so the report can distinguish the two stores.
+        """
+        from agent.memory_staleness import Note
+
+        notes: List[Note] = []
+        for idx, entry in enumerate(entries):
+            text = (entry or "").strip()
+            if not text:
+                continue
+            lines = text.splitlines()
+            title = lines[0].strip() if lines else text
+            content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+            notes.append(
+                Note(
+                    id=f"{target}-{idx}",
+                    title=title or text,
+                    content=content or text,
+                    kind=target,
+                )
+            )
+        return notes
+
+    def collect_notes(self) -> List["Note"]:
+        """Gather :class:`~agent.memory_staleness.Note` objects from all stores.
+
+        Reads the on-disk built-in memory store (MEMORY.md + USER.md) via
+        :func:`tools.memory_tool.load_on_disk_store` and converts each entry
+        to a :class:`Note`. This is the bridge between the real memory store
+        and the side-effect-free staleness analysis — no notes are mutated.
+
+        Returns an empty list when no memory files exist (a fresh profile),
+        which yields a pristine ``StalenessReport`` (quality score 1.0).
+        """
+        try:
+            from tools.memory_tool import load_on_disk_store
+
+            store = load_on_disk_store()
+        except Exception as e:
+            logger.warning("check_staleness: could not load memory store: %s", e)
+            return []
+
+        notes: List["Note"] = []
+        notes.extend(self._entries_to_notes(store.memory_entries, target="memory"))
+        notes.extend(self._entries_to_notes(store.user_entries, target="user"))
+        return notes
+
+    def check_staleness(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> "StalenessReport":
+        """Run staleness detection over the current memory corpus (#797).
+
+        This is the real consumer of :func:`agent.memory_staleness.analyze`:
+        it collects notes from the on-disk memory store and runs every
+        staleness detector (age, contradiction, low-quality, duplicate,
+        superseded), then returns a :class:`StalenessReport` the caller can
+        render or act on. Suitable as an end-of-turn hook or a CLI
+        ``hermes memory stale`` invocation.
+
+        The analysis is pure — no notes are mutated and no memory API is
+        called. Pass ``config`` to override the default thresholds.
+        """
+        from agent.memory_staleness import analyze, StalenessReport
+
+        notes = self.collect_notes()
+        return analyze(notes, config=config)
+
+    def render_staleness_report(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Run :meth:`check_staleness` and render the result as markdown.
+
+        Convenience wrapper for the CLI ``hermes memory stale`` subcommand and
+        any caller that wants a human-readable string rather than the
+        structured :class:`StalenessReport`.
+        """
+        from agent.memory_staleness import render_report
+
+        return render_report(self.check_staleness(config=config))
 
     def check_contradictions(
         self,
@@ -1205,6 +1299,41 @@ class MemoryManager:
                 self.on_memory_write(mirrored_action, target, content, metadata=metadata)
             except Exception as e:
                 logger.debug("notify_memory_tool_write failed for op %s: %s", action, e)
+
+
+    def detect_memory_conflicts(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> "ConflictReport":
+        """Run conflict detection over the current memory corpus (#908).
+
+        This is the real consumer of :func:`agent.memory_conflicts.analyze_conflicts`:
+        it collects notes from the on-disk memory store (the same
+        :meth:`collect_notes` used by :meth:`check_staleness`) and flags pairs
+        of notes that claim different values for the same topic. Both notes
+        stay exactly as they are — this is analysis only, not a mutation —
+        so a caller can surface the disagreement (CLI report, system-prompt
+        note) instead of an agent silently trusting whichever entry it read
+        last.
+
+        Pass ``config`` to override the default similarity thresholds.
+        """
+        from agent.memory_conflicts import ConflictReport, analyze_conflicts
+
+        notes = self.collect_notes()
+        return analyze_conflicts(notes, config=config)
+
+    def render_memory_conflicts(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Run :meth:`detect_memory_conflicts` and render the result as markdown.
+
+        Convenience wrapper for the CLI ``hermes memory conflicts`` subcommand
+        and any caller that wants a human-readable string rather than the
+        structured :class:`~agent.memory_conflicts.ConflictReport`.
+        """
+        from agent.memory_conflicts import render_conflict_report
+
+        return render_conflict_report(self.detect_memory_conflicts(config=config))
 
     def on_delegation(self, task: str, result: str, *, child_session_id: str = "", **kwargs) -> None:
         if self._fork_turn_hooks_suppressed() or not self._owner_allows("on_delegation"):
