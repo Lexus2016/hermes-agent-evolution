@@ -227,7 +227,7 @@ jobs:
         # HERMES_E2E_REQUIRE_TUI=1 below turns a missing build into a failure.
         uses: ./.github/actions/retry
         with:
-          command: npm ci --workspace ui-tui --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
+          command: pnpm install --frozen-lockfile --filter "{./ui-tui}..." --ignore-scripts && pnpm --dir ui-tui run build
 
       - name: Install ripgrep (prebuilt binary)
         run: |
