@@ -5326,6 +5326,9 @@ from cron.scheduler_tick import tick
 from cron.scheduler_delivery import (
     _deliver_result, _delivery_lane_value, _normalize_deliver_value, _resolve_delivery_target,
     _resolve_delivery_targets,
+    # Re-exported for the fork's tests, which patch ``cron.scheduler._resolve_origin``
+    # (the delivery split moved the definition into scheduler_delivery).
+    _resolve_origin,
 )
 from cron.scheduler_script import (
     _get_session_db_timeout, _run_job_script, _run_job_script_with_claim_heartbeat, _start_heartbeat_thread,
@@ -5334,6 +5337,8 @@ from cron.scheduler_prompt import (
     _PROMPT_FRAME, _PROMPT_HEADING, _PROMPT_SEPARATOR, _RESPONSE_FRAME, _RESPONSE_HEADING,
     _RESPONSE_TERMINATOR, _block_and_pause_job, _build_job_prompt, _guard_job_credential_exfil,
     _job_doc_header, _parse_wake_gate,
+    # Same reason: the cron prompt-injection tests patch the prompt scanner here.
+    _scan_assembled_cron_prompt,
 )
 from cron.scheduler_preflight import (
     BALANCE_LOW_MARKER, BALANCE_LOW_SILENT_MARKER,
