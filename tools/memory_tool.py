@@ -414,46 +414,106 @@ def memory_tool(
     return result
 
 
-def _memory_tool(action, target, content, old_text, new_text, operations, store) -> tuple[str, str]:
-    """``(outcome, result_json)``: ``rejected`` when refused or held before touching the store."""
-    # An omitted optional string can arrive as "" (#90468): let the new_text alias fill it.
+def _memory_tool(
+    action: Optional[str],
+    target: Optional[str],
+    content: Optional[str],
+    old_text: Optional[str],
+    new_text: Optional[str],
+    source_class: str,
+    trust_tier: str,
+    source_filter: Optional[object],
+    min_trust: Optional[str],
+    include_superseded: bool,
+    operations: Optional[list[dict[str, Any]]],
+    target_size: Optional[int],
+    prefer: str,
+    memory_char_limit: Optional[int],
+    store: MemoryStore,
+) -> tuple[str, str]:
+    """Internal memory dispatch returning (outcome, result_json)."""
+    # Accept new_text as alias for content
     if not content and new_text:
         content = new_text
+
+    if target is None:
+        target = "memory"
+
     target_error = _memory_target_error(store, target, operations)
     if target_error is not None:
         return "rejected", json.dumps(target_error)
+
+    bg_gate = _background_delete_gate(store, action, operations, target=target, content=content, old_text=old_text)
+    if bg_gate is not None:
+        return "rejected", bg_gate
+
+    if action == "search":
+        rows = store.search(
+            target,
+            source_filter=source_filter,
+            min_trust=min_trust,
+            include_superseded=bool(include_superseded),
+        )
+        return "success", json.dumps(
+            {
+                "success": True,
+                "target": target,
+                "results": rows,
+                "result_count": len(rows),
+            },
+            ensure_ascii=False,
+        )
+
+    if action == "compact":
+        prefer_param = prefer if prefer is not None else "longest"
+        try:
+            target_size_int = int(target_size) if target_size is not None else None
+        except (TypeError, ValueError):
+            return _invalid("target_size must be an integer number of characters.")
+        result = store.compact(target, target_size=target_size_int, prefer=prefer_param)
+        return _applied(result)
+
     if operations:
-        if not isinstance(operations, list):
-            return _invalid("operations must be a list of {action, content?, old_text?} objects.")
-        if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
-            return _invalid(_REPLACE_REMOVED)
-        denied = _background_delete_gate(store, action, operations, target)
-        if denied is not None:
-            return "rejected", denied
-        # Approval gate: stages (background/gateway) or prompts inline (CLI); off by default.
-        gate_result = _apply_write_gate(store, "batch", target, None, None, operations)
-        if gate_result is not None:
-            return "rejected", gate_result
-        return _applied(store.apply_batch(target, operations))
-    # Reject calls with neither operations[] nor the legacy top-level action.
-    # Without this guard the dispatch falls through to the generic
-    # "Unknown action 'None'" error, which gives the model no signal about
-    # *why* the call was malformed and can trigger repeated retries. (#64291)
+        return _handle_operations_batch(
+            store, target, operations, source_class, trust_tier, memory_char_limit
+        )
+
     if not action and not operations:
         return _invalid(
-            "Missing required parameter: 'operations', a list of {action: add/patch/remove, "
-            "content?, old_text?} changes; a single change is a one-item list."
+            "Missing required parameter: provide 'action' (add/patch/remove) "
+            "or 'operations' (batch list). Got neither."
         )
+
     if action == "replace":
         return _invalid(_REPLACE_REMOVED)
-    if action not in _STORE_ACTIONS:
-        return _invalid(f"Unknown action '{action}'. Use: add, patch, remove")
-    invalid = (_validate_single_op(store, action, target, content, old_text)
-               or _background_delete_gate(store, action, None, target, content, old_text)
-               or _apply_write_gate(store, action, target, content, old_text))
-    if invalid is not None:
-        return "rejected", invalid
-    return _applied(_STORE_ACTIONS[action][0](store, target, content, old_text))
+
+    if action in ("add", "patch", "remove"):
+        invalid = _validate_single_op(store, action, target, content, old_text)
+        if invalid is not None:
+            return "rejected", invalid
+        gate_result = _apply_write_gate(
+            store, action, target, content, old_text,
+            source_class=source_class, trust_tier=trust_tier,
+        )
+        if gate_result is not None:
+            return "rejected", gate_result
+        try:
+            result = _STORE_ACTIONS[action][0](
+                store, target, content, old_text,
+                source_class=source_class, trust_tier=trust_tier,
+            )
+        except Exception as exc:
+            return "failed", _memory_enriched_error(exc, action)
+        return _applied(result)
+
+    if action == "supersede":
+        try:
+            result = store.supersede(target, old_text)
+        except Exception as exc:
+            return "failed", _memory_enriched_error(exc, "supersede")
+        return _applied(result)
+
+    return _invalid(f"Unknown action '{action}'. Use: add, patch, replace, remove, search, compact, supersede")
 
 
 def get_builtin_memory_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -691,3 +751,28 @@ def __getattr__(name):  # PEP 562 — lazy so no import cycles
     import importlib
     return getattr(importlib.import_module(target[0]), target[1])
 # ---- END PLUGIN-COMPAT ----
+
+
+def _handle_operations_batch(
+    store: MemoryStore,
+    target: str,
+    operations: Any,
+    source_class: str,
+    trust_tier: str,
+    memory_char_limit: Optional[int],
+) -> tuple[str, str]:
+    if not isinstance(operations, list):
+        return _invalid("operations must be a list of {action, content?, old_text?} objects.")
+    if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
+        return _invalid(_REPLACE_REMOVED)
+    gate_result = _apply_write_gate(
+        store, "batch", target, None, None, operations,
+        source_class=source_class, trust_tier=trust_tier,
+    )
+    if gate_result is not None:
+        return "rejected", gate_result
+    try:
+        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
+    except Exception as exc:  # health: allow BLE001 -- deliberate boundary returning formatted memory error
+        return "failed", _memory_enriched_error(exc, "batch")
+    return _applied(result)
