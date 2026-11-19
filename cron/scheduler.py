@@ -5328,7 +5328,7 @@ from cron.scheduler_delivery import (
     _resolve_delivery_targets,
 )
 from cron.scheduler_script import (
-    _get_session_db_timeout, _run_job_script_with_claim_heartbeat, _start_heartbeat_thread,
+    _get_session_db_timeout, _run_job_script, _run_job_script_with_claim_heartbeat, _start_heartbeat_thread,
 )
 from cron.scheduler_prompt import (
     _PROMPT_FRAME, _PROMPT_HEADING, _PROMPT_SEPARATOR, _RESPONSE_FRAME, _RESPONSE_HEADING,

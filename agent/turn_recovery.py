@@ -1061,6 +1061,12 @@ def nonretryable_client_error_result(
         )
     _welcome_hint = _welcome_tier_guidance(classified, model=model, in_chat=False)
     _prefix_suggestion = _missing_vendor_prefix_suggestion(api_error, provider, model)
+    # Guidance helpers live in the loop module (tests import and patch them there);
+    # importing here avoids the module cycle conversation_loop -> turn_recovery.
+    from agent.conversation_loop import (
+        _USER_ACTIONABLE_ABORT_REASONS,
+        _user_actionable_provider_guidance,
+    )
     from hermes_cli.left_core_migration import host_install_hint
     if _moved_hint := host_install_hint(base_url):  # a host whose plugin left core: install it first
         _vlines(agent, f"   💡 {_moved_hint}")

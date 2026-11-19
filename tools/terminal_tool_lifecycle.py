@@ -331,3 +331,29 @@ def _evict_environment_for_task(task_id: Optional[str]) -> None:
     for env in evicted:
         with _quiet("cleanup of degraded environment failed"):
             env.cleanup()
+
+
+def _check_disk_usage_warning():
+    """True when hermes scratch dirs exceed the warning threshold (cached, advisory)."""
+    from tools.terminal_tool import DISK_USAGE_WARNING_THRESHOLD_GB
+    if time.monotonic() - _disk_usage_cache["timestamp"] < _DISK_USAGE_CACHE_TTL:
+        return _disk_usage_cache["result"]
+    try:
+        total_bytes = 0
+        for path in _scratch_paths():
+            for f in Path(path).rglob('*'):
+                if f.is_file():
+                    with _quiet("Could not stat file %s", f, exc=OSError):
+                        total_bytes += f.stat().st_size
+        total_gb = total_bytes / (1024 ** 3)
+        exceeded = total_gb > DISK_USAGE_WARNING_THRESHOLD_GB
+        if exceeded:
+            logger.warning("Disk usage (%.1fGB) exceeds threshold (%.0fGB). Consider running cleanup_all_environments().",
+                           total_gb, DISK_USAGE_WARNING_THRESHOLD_GB)
+        _disk_usage_cache["timestamp"] = time.monotonic()
+        _disk_usage_cache["result"] = exceeded
+        return exceeded
+    except Exception:
+        # Don't update cache on error so the next call retries.
+        logger.debug("Disk usage warning check failed", exc_info=True)
+        return False
