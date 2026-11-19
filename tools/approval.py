@@ -790,6 +790,15 @@ def _command_findings(command: str) -> list[tuple[str, str]]:
         (key, key) for key in detect_content_rule_keys(command) if key != pattern_key]
 
 
+def _tirith_findings(tirith_result: dict) -> list[tuple[str, str]]:
+    """``[(tirith:<rule_id>, description)]`` for a block/warn scan verdict, so a Tirith finding
+    reaches the same consent machinery (and the same session/permanent allowlist) as a shell
+    pattern finding. The key keeps the ``tirith:`` namespace the allowlist grain has always used."""
+    findings = tirith_result.get("findings") or []
+    rule_id = findings[0].get("rule_id", "unknown") if findings else "unknown"
+    return [(f"tirith:{rule_id}", _format_tirith_description(tirith_result))]
+
+
 def _pending_findings(findings: list[tuple[str, str]], approved) -> tuple[list[str], str] | None:
     """``(pattern_keys, description)`` of *findings* still needing consent, or None.
     ``approved(key)`` is the session or permanent check."""
@@ -839,6 +848,12 @@ def _unattended_deny(command: str, ctx: _Unattended) -> dict | None:
         if ctx.name == "single_query":
             result.update(pattern_key=keys[0], description=description)
         return result
+    tirith = _tirith_scan(command)
+    if tirith.get("configuration_error"):
+        return {"approved": False, "message": tirith["summary"],
+                "failure_class": "configuration_error"}
+    if tirith.get("action") in ("block", "warn"):
+        return block(_format_tirith_description(tirith))
     return None
 
 
@@ -1402,7 +1417,16 @@ def check_all_command_guards(command: str, env_type: str,
         return _approved()
 
     session_key = get_current_session_key()
+    tirith_result = _tirith_scan(command)
+    # A missing policy cannot be approved or cached as an ordinary scan finding.
+    if tirith_result.get("configuration_error"):
+        return {"approved": False, "message": tirith_result["summary"],
+                "failure_class": "configuration_error"}
     findings = _command_findings(command)
+    # The scan verdict outranks the shell-pattern finding it accompanies: approve the exact
+    # rule Tirith named first, then the pattern, the same order the combined prompt showed.
+    if tirith_result.get("action") in {"block", "warn"}:
+        findings = _tirith_findings(tirith_result) + findings
     scopes = {key: _approval_scope(session_key, key) for key, _ in findings}
     pending = _pending_findings(findings, lambda key: scopes[key] is not None)
     if pending is None:
