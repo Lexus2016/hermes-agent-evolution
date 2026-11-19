@@ -18,6 +18,12 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
 from agent.redact import redact_for_egress
+from agent.memory_importance import (
+    REVOCATION_REASON_CONTRADICTION,
+    EpisodicMemoryStore,
+    MemoryEvent,
+    score_importance,
+)
 
 from agent.memory_caller_scope import bound_scope, caller_scope, claim_instance, in_owner_home, refused_tool_message
 # Moved to agent.memory_context / agent.memory_manager_tools; still importable here because agent.memory_manager is a public
@@ -232,6 +238,8 @@ class MemoryManager:
         # manager so the ``hermes memory score`` CLI subcommand and tests
         # can inspect/score it without re-deriving the events.
         self.episodic_store: EpisodicMemoryStore = EpisodicMemoryStore()
+        # Retrievals logged during prefetch that still need an outcome (#1480).
+        self._pending_retrievals: List[tuple[str, str]] = []
         # Futures by durability class ("write" / "prefetch") so shutdown can drain FIFO
         # within a bound, then report exactly what it abandoned.
         self._background_futures: dict[Future, str] = {}
@@ -372,9 +380,16 @@ class MemoryManager:
         if not clean_query or not self._owner_allows("prefetch"):
             return ""
         clean_query = _redact_for_provider(clean_query)
-        parts = self._each_provider(
-            "prefetch failed (non-fatal)", lambda p: self._prefetch_provider(p, clean_query, session_id=session_id),
-        )
+
+        def _prefetch_one(p: MemoryProvider) -> str:
+            result = self._prefetch_provider(p, clean_query, session_id=session_id)
+            if result and result.strip():
+                # Retrieval-utility logging (#1480): remember that this provider
+                # returned context for this query so sync_all can score its outcome.
+                self._record_retrieval_utility(p.name, clean_query, session_id=session_id)
+            return result
+
+        parts = self._each_provider("prefetch failed (non-fatal)", _prefetch_one)
         return "\n\n".join(p for p in parts if p and p.strip())
 
     def _prefetch_provider(self, provider: MemoryProvider, query: str, *, session_id: str = "") -> str:
@@ -692,6 +707,83 @@ class MemoryManager:
                 )
         return revoked
 
+    @staticmethod
+    def _retrieval_utility_enabled() -> bool:
+        """Check the ``memory.retrieval_utility.enabled`` config flag.
+
+        The flag defaults to ``False`` (opt-in). Without this gate the
+        retrieval-utility logger writes a per-retrieval record to disk on
+        every memory hit in every session — an unasked-for on-disk trace.
+        """
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            config = load_config_readonly() or {}
+            return bool(
+                (config.get("memory") or {}).get("retrieval_utility", {}).get("enabled")
+            )
+        except Exception:
+            return False
+
+    def _record_retrieval_utility(
+        self, provider_name: str, query: str, *, session_id: str = ""
+    ) -> None:
+        """Log a retrieval to the utility sidecar (called from prefetch_all).
+
+        Records (provider_name, query, session_id) so that the downstream
+        outcome can be recorded later in sync_all. The record_id is the
+        provider name — granular enough to measure per-provider utility
+        without needing to parse the returned context into individual
+        records.
+
+        Gated behind ``memory.retrieval_utility.enabled`` (default OFF) so
+        ordinary sessions never write the sidecar.
+        """
+        if not self._retrieval_utility_enabled():
+            return
+        try:
+            from agent.retrieval_utility import record_retrieval
+
+            record_id = f"memory:{provider_name}"
+            self._pending_retrievals.append((record_id, session_id))
+            record_retrieval(
+                record_id, retrieval_context=query[:200], session_id=session_id
+            )
+        except Exception as e:
+            logger.debug("retrieval-utility logging failed (non-fatal): %s", e)
+
+    def _record_retrieval_outcomes(self, event: Optional[Any]) -> None:
+        """Record downstream outcomes for retrievals logged this turn.
+
+        Called from sync_all after score_memories produces the friction
+        signals for the turn. Uses ``event.friction_signals`` to derive a
+        coarse outcome label (helpful/neutral/harmful) and records it
+        against each pending retrieval.
+        Gated behind ``memory.retrieval_utility.enabled`` (default OFF).
+        """
+        if not self._pending_retrievals:
+            return
+        if not self._retrieval_utility_enabled():
+            self._pending_retrievals.clear()
+            return
+        try:
+            from agent.retrieval_utility import record_outcome, derive_outcome
+
+            friction_signals = {}
+            if event is not None and hasattr(event, "friction_signals"):
+                friction_signals = event.friction_signals or {}
+            outcome = derive_outcome(friction_signals)
+            for record_id, _session_id in self._pending_retrievals:
+                record_outcome(
+                    record_id, outcome=outcome, friction_signals=friction_signals
+                )
+        except Exception as e:
+            logger.debug(
+                "retrieval-utility outcome recording failed (non-fatal): %s", e
+            )
+        finally:
+            self._pending_retrievals.clear()
+
     def sync_all(self, user_content: str, assistant_content: str, *, session_id: str = "",
                  messages: Optional[list[dict[str, Any]]] = None,
                  turn_author: Optional[dict[str, Any]] = None) -> None:
@@ -707,6 +799,24 @@ class MemoryManager:
         """
         if self._fork_turn_hooks_suppressed():
             return
+        # Score this turn's friction signals and record it as an episodic memory
+        # event (#752). The store must fill even with no providers registered, and
+        # scoring is cheap and offline, so it runs inline before the provider guard.
+        try:
+            event = self.score_memories(
+                user_content,
+                assistant_content,
+                session_id=session_id,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.debug("score_memories() failed during sync (non-fatal): %s", e)
+            event = None
+
+        # Retrieval-utility outcome recording (#1480): score the retrievals logged
+        # during prefetch for this turn against what the friction signals show.
+        self._record_retrieval_outcomes(event)
+
         providers = list(self._providers)
         clean_user_content = self._strip_skill_scaffolding(user_content) if providers else None
         if not clean_user_content or not self._owner_allows("sync_turn"):

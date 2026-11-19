@@ -70,6 +70,43 @@ class PluginContext(PluginCapabilityCtxMixin):
             _facade().logger.warning("Rejected config path %r from plugin %s", key, self.plugin_id)
             raise
 
+    def _within_trusted_plugin_root(self) -> bool:
+        """True when this plugin really lives under the profile's plugins dir (#1389)."""
+        raw_path = getattr(self.manifest, "path", None)
+        if not raw_path:
+            return False
+        try:
+            from hermes_constants import get_hermes_home
+
+            plugin_path = Path(raw_path).resolve(strict=True)
+            trusted_root = (get_hermes_home() / "plugins").resolve(strict=True)
+        except Exception:
+            return False
+        return plugin_path == trusted_root or trusted_root in plugin_path.parents
+
+    def _hook_trust_allowed(self) -> bool:
+        """True when this plugin may register lifecycle hooks (#1389).
+
+        Bundled plugins are trusted; user plugins only when they are contained in
+        the profile's plugins dir; anything else must opt in via
+        ``plugins.entries.<source:key>.allow_hooks``.
+        """
+        source = getattr(self.manifest, "source", "") or ""
+        if source == "bundled":
+            return True
+        if source == "user" and self._within_trusted_plugin_root():
+            return True
+        try:
+            from hermes_cli.config import load_config
+
+            cfg = load_config() or {}
+        except Exception:
+            return False
+        plugin_id = getattr(self.manifest, "key", "") or getattr(self.manifest, "name", "")
+        entries = (cfg.get("plugins") or {}).get("entries") or {}
+        entry = entries.get(f"{source}:{plugin_id}") or {}
+        return bool(entry.get("allow_hooks", False))
+
     def get_config(self, key: str, default: Any = None) -> Any:
         """Read plugin-relative ``plugins.entries.<plugin_id>.settings.<key>`` (falls back to the
         legacy ``config`` subtree for migration compatibility)."""

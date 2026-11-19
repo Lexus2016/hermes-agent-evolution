@@ -345,7 +345,8 @@ def session_tool_names(tool_defs: Iterable[dict[str, Any]]) -> frozenset[str]:
     return frozenset(n for n in _tool_def_names(tool_defs) if n)
 
 
-def classify_tools(tool_defs: list[dict[str, Any]], defer_tools: Optional[frozenset] = None,
+def classify_tools(tool_defs: list[dict[str, Any]], defer_tools: Optional[Any] = None,
+                   config: Optional[Any] = None,
                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a tool-defs list into (visible, deferrable); bridge tools are dropped (re-added
     after classification)."""
@@ -353,7 +354,7 @@ def classify_tools(tool_defs: list[dict[str, Any]], defer_tools: Optional[frozen
     deferrable: list[dict[str, Any]] = []
     for td, name in zip(tool_defs, _tool_def_names(tool_defs)):
         if name not in BRIDGE_TOOL_NAMES:
-            (deferrable if is_deferrable_tool_name(name, defer_tools) else visible).append(td)
+            (deferrable if is_deferrable_tool_name(name, defer_tools, config=config) else visible).append(td)
     return visible, deferrable
 
 
