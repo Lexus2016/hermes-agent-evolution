@@ -754,6 +754,35 @@ class MemoryStore:
             return self.memory_char_limit
         return int(limit_override)
 
+    def _gate_write(self, content: str):
+        """Decide whether ``content`` may be written, reusing the threat scanner.
+
+        Returns ``(error, effective_content, guard_event)``:
+
+        * ``error`` -- a non-None error string means BLOCK the write.
+        * ``effective_content`` -- the content to store (differs from the input only when a guard
+          ``strip`` action fired).
+        * ``guard_event`` -- an optional structured dict describing a warn/strip decision for the
+          caller to log; ``None`` for the legacy path and for clean content.
+
+        DEFAULT-OFF / BACKWARD-COMPAT (issue #315): when ``self._guard`` is ``None`` (the default)
+        this collapses to the pre-#315 behaviour -- the binary ``_scan_memory_content`` block -- so
+        clean writes pass and poisoned writes are refused exactly as before, with no strip/warn and
+        no event. The guard only participates when explicitly configured on.
+        """
+        if self._guard is None:
+            # Legacy path: binary block, byte-identical to pre-#315.
+            return _scan_memory_content(content), content, None
+        # The entry's provenance is resolved by the caller into self._last_provenance; the guard
+        # routes its action off the source class. It reuses the scanner internally for detection.
+        outcome = self._guard.evaluate(content, self._last_provenance)
+        if not outcome.allowed:
+            return outcome.message, content, None
+        if outcome.action in ("warn", "strip"):
+            return None, outcome.content, outcome.to_event()
+        # allow (clean content, or an explicit allow rule): no event.
+        return None, outcome.content, None
+
     def _usage(self, target: str) -> str:
         return f"{self._char_count(target):,}/{self._char_limit(target):,}"
 
@@ -903,10 +932,16 @@ class MemoryStore:
         prov_error = _validate_provenance(source_class, trust_tier)
         if prov_error:
             return _error(prov_error, "invalid_provenance")
+        # Scan the user-visible content (not the provenance trailer) before accepting. Guard-off
+        # (default) is the pre-#315 binary block; a configured guard may warn (store as-is) or strip
+        # (store the excised content).
         if self._guard is not None:
             self._last_provenance = _make_provenance(source_class, trust_tier)
-        if scan_error := _scan_memory_content(content):
+        scan_error, content, guard_event = self._gate_write(content)
+        if scan_error:
             return _error(scan_error, "scan_blocked")
+        if guard_event is not None:
+            _log_guard_event("add", target, guard_event)
         stored = encode_provenance(content, source_class, trust_tier)
 
         def _add(entries, limit):
@@ -941,13 +976,18 @@ class MemoryStore:
             return _error("old_text cannot be empty.", "missing_old_text")
         if not new_content:
             return _error("new_content cannot be empty. Use 'remove' to delete entries.", "missing_content")
-        if scan_error := _scan_memory_content(new_content):
-            return _error(scan_error, "scan_blocked")
         prov_error = _validate_provenance(source_class, trust_tier)
         if prov_error:
             return _error(prov_error, "invalid_provenance")
+        # Scan replacement content for injection/exfiltration. Guard-off (default) = pre-#315 binary
+        # block; guard-on may warn or strip.
         if self._guard is not None:
             self._last_provenance = _make_provenance(source_class, trust_tier)
+        scan_error, new_content, guard_event = self._gate_write(new_content)
+        if scan_error:
+            return _error(scan_error, "scan_blocked")
+        if guard_event is not None:
+            _log_guard_event("replace", target, guard_event)
         return self._edit(target, old_text.strip(),
                           encode_provenance(new_content, source_class, trust_tier),
                           matched_entry)
