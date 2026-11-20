@@ -101,6 +101,14 @@ class InlineToolContext:
 
 InlineToolExecutor = Callable[[Any, dict, InlineToolContext], Any]
 
+# Refusals the memory store answers with: malformed args, a disabled store, or a
+# gate that staged / blocked the write. None of them means the backend is down, so
+# none of them may open the memory circuit breaker (#977).
+_MEMORY_REFUSAL_CLASSES = frozenset({
+    "invalid_args", "disabled", "missing_content", "missing_old_text",
+    "scan_blocked", "would_empty", "over_budget", "gate_refused", "staged",
+})
+
 # ``(kwarg, args_key)`` → ``args.get(key)``; ``(kwarg, args_key, default)`` → ``args.get(key, default)``.
 _ArgSpec = tuple[Any, ...]
 
@@ -182,6 +190,8 @@ def _memory(agent, args: dict, ctx: InlineToolContext) -> Any:
         _ok = True
     if _ok:
         _mem_breaker.record_success()
+    elif isinstance(_parsed, dict) and _parsed.get("failure_class") in _MEMORY_REFUSAL_CLASSES:
+        pass  # the store answered; do not count a refused call as a backend failure
     else:
         _mem_breaker.record_failure()
         if _mem_breaker.should_trip():

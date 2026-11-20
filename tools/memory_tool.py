@@ -405,6 +405,18 @@ def memory_tool(
     finally:
         FAILURE_CLASS.reset(token)
 
+    # Classified failures carry their class back to callers (the inline executor's
+    # circuit breaker reads it): a refused call is an answer from a working store,
+    # not a broken backend, and must not open the "proceed without persistence" gate.
+    if outcome != "success":
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, dict) and parsed.get("success") is False:
+                parsed.setdefault("failure_class", failure_class)
+                result = json.dumps(parsed, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+
     try:
         from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
         record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
@@ -435,9 +447,6 @@ def _memory_tool(
     # Accept new_text as alias for content
     if not content and new_text:
         content = new_text
-
-    if target is None:
-        target = "memory"
 
     target_error = _memory_target_error(store, target, operations)
     if target_error is not None:
@@ -588,7 +597,7 @@ def apply_memory_pending(payload: dict[str, Any], store: MemoryStore) -> dict[st
     staged before pinning has no verifiable target, so it is refused rather than replayed by
     old_text (which could hit a newer entry the approver never saw). Provenance tags from the
     staged payload are preserved (#316)."""
-    action, target = payload.get("action"), payload.get("target", "memory")
+    action, target = payload.get("action"), payload.get("target")
     target_error = _memory_target_error(store, target, payload.get("operations"))
     if target_error is not None:
         return target_error
@@ -716,7 +725,7 @@ registry.register(
     schema=MEMORY_SCHEMA,
     handler=lambda args, **kw: memory_tool(
         action=args.get("action", ""),
-        target=args.get("target", "memory"),
+        target=args.get("target"),
         content=args.get("content"),
         old_text=args.get("old_text"),
         new_text=args.get("new_text"),
