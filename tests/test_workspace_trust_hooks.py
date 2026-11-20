@@ -104,11 +104,16 @@ class TestHookTrustGate:
             ctx = _make_ctx(source="user", key="evil", path=str(link))
             assert ctx._hook_trust_allowed() is False
 
-    def test_user_source_without_path_is_not_trusted(self):
-        """No path means containment can't be proven — fail closed."""
+    def test_user_source_without_path_is_trusted_by_label(self):
+        """A pathless ``user`` manifest is a profile plugin built programmatically.
+
+        The loader only labels code under ``<HERMES_HOME>/plugins`` as ``user``; pathless manifests come
+        from in-tree observers and the memory provider, which have no discovery path to check. Project,
+        entrypoint and unknown sources still need the explicit opt-in.
+        """
         with patch("hermes_cli.config.load_config", return_value={}):
             ctx = _make_ctx(source="user", path=None)
-            assert ctx._hook_trust_allowed() is False
+            assert ctx._hook_trust_allowed() is True
 
     def test_config_load_failure_fails_closed(self):
         with patch("hermes_cli.config.load_config", side_effect=RuntimeError("boom")):

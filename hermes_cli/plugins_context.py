@@ -96,6 +96,11 @@ class PluginContext(PluginCapabilityCtxMixin):
         # profile plugin whatever label the loader attached (the memory loader leaves the source empty).
         if self._within_trusted_plugin_root():
             return True
+        # A user-labelled manifest without a path is a programmatically constructed profile plugin
+        # (in-tree observers, the memory provider): the loader's label is the whole trust class, and the
+        # loader only assigns "user" to code under the profile. Project/entrypoint/unknown stay untrusted.
+        if source == "user" and not getattr(self.manifest, "path", None):
+            return True
         try:
             from hermes_cli.config import load_config
 
