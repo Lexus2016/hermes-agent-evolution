@@ -17,9 +17,23 @@ REDACTOR = (
 )
 
 
-def test_the_hold_lasts_as_long_as_the_registration_that_declared_it():
+@pytest.fixture
+def trusted_manifest(tmp_path, monkeypatch):
+    """A ``user`` manifest whose code really sits under ``<HERMES_HOME>/plugins`` (#1389 gate)."""
+    home = tmp_path / "hermes_home"
+    plugin_dir = home / "plugins" / "p"
+    plugin_dir.mkdir(parents=True)
+    monkeypatch.setattr("hermes_cli.plugins.get_hermes_home", lambda: home)
+
+    def make(name):
+        return PluginManifest(name=name, source="user", path=str(plugin_dir))
+
+    return make
+
+
+def test_the_hold_lasts_as_long_as_the_registration_that_declared_it(trusted_manifest):
     manager = PluginManager()
-    ctx = PluginContext(PluginManifest(name="redactor", source="user"), manager)
+    ctx = PluginContext(trusted_manifest("redactor"), manager)
     ctx.register_hook("transform_llm_output", lambda **_: None)
     assert manager.holds_stream() is False  # a rewrite that did not ask keeps streaming
 
@@ -57,9 +71,9 @@ def test_only_the_declaring_profile_holds(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("hook", ["post_llm_call", "transform_tool_result"])
-def test_a_hold_on_a_hook_that_does_not_rewrite_the_reply_holds_nothing(hook, caplog):
+def test_a_hold_on_a_hook_that_does_not_rewrite_the_reply_holds_nothing(hook, caplog, trusted_manifest):
     manager = PluginManager()
-    ctx = PluginContext(PluginManifest(name="observer", source="user"), manager)
+    ctx = PluginContext(trusted_manifest("observer"), manager)
     ctx.register_hook(hook, lambda **_: None, hold_stream=True)
     assert manager.holds_stream() is False
     assert "hold_stream" in caplog.text

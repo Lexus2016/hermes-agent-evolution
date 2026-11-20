@@ -76,11 +76,9 @@ class PluginContext(PluginCapabilityCtxMixin):
         if not raw_path:
             return False
         try:
-            from hermes_constants import get_hermes_home
-
             plugin_path = Path(raw_path).resolve(strict=True)
-            trusted_root = (get_hermes_home() / "plugins").resolve(strict=True)
-        except Exception:
+            trusted_root = (_facade().get_hermes_home() / "plugins").resolve(strict=True)
+        except OSError:
             return False
         return plugin_path == trusted_root or trusted_root in plugin_path.parents
 
@@ -94,7 +92,9 @@ class PluginContext(PluginCapabilityCtxMixin):
         source = getattr(self.manifest, "source", "") or ""
         if source == "bundled":
             return True
-        if source == "user" and self._within_trusted_plugin_root():
+        # Containment is the real signal: a plugin whose code resolves inside <HERMES_HOME>/plugins is a
+        # profile plugin whatever label the loader attached (the memory loader leaves the source empty).
+        if self._within_trusted_plugin_root():
             return True
         try:
             from hermes_cli.config import load_config
@@ -153,7 +153,15 @@ class PluginContext(PluginCapabilityCtxMixin):
         self, kind: str, key: str, release: Callable[[], None], *, persistent: bool = False,
     ) -> PluginRegistration:
         """Record host-owned cleanup for a registration (``persistent``: see ``_track_registration``)."""
-        return self._manager._track_registration(self.manifest, kind, key, release, persistent=persistent)
+        tracker = getattr(self._manager, "_track_registration", None)
+        if callable(tracker):
+            return tracker(self.manifest, kind, key, release, persistent=persistent)
+        return PluginRegistration(
+            kind=kind,
+            key=key,
+            release=release,
+            plugin_key=self.manifest.key or self.manifest.name,
+        )
 
     def _track_replacement(
         self, kind: str, key: str, *, slot: tuple, current: Any, previous: Any,
@@ -776,8 +784,44 @@ class PluginContext(PluginCapabilityCtxMixin):
         return handles
 
     def register_hook(self, hook_name: str, callback: Callable, *, hold_stream: bool = False) -> PluginRegistration:
-        """Register a lifecycle hook callback (``PluginDispatchMixin.track_hook``)."""
-        return self._manager.track_hook(self, hook_name, callback, hold_stream=hold_stream)
+        """Register a lifecycle hook callback (``PluginDispatchMixin.track_hook``).
+
+        Workspace-trust gate (#1389): a plugin whose code is not trusted may not intercept tool calls,
+        and every accepted registration is audit-logged with its source and trust level.
+        """
+        if not self._hook_trust_allowed():
+            source = getattr(self.manifest, "source", "") or "unknown"
+            _facade().logger.warning(
+                "Plugin '%s' (source=%s) is not trusted to register hooks; "
+                "set plugins.entries.%s:%s.allow_hooks: true to opt in",
+                self.manifest.name,
+                source,
+                source,
+                self.manifest.key or self.manifest.name,
+            )
+            return PluginRegistration(
+                kind="hook",
+                key=hook_name,
+                release=lambda: None,
+                plugin_key=self.manifest.key or self.manifest.name,
+            )
+        tracker = getattr(self._manager, "track_hook", None)
+        if tracker is not None:
+            handle = tracker(self, hook_name, callback, hold_stream=hold_stream)
+        else:
+            handle = self._track_callback(
+                "hook", hook_name, callback, self._manager._hooks, _facade().VALID_HOOKS
+            )
+            handle.hold_stream = bool(hold_stream)
+        source = getattr(self.manifest, "source", "") or ""
+        _facade().logger.info(
+            "Hook registered: plugin='%s' hook='%s' source='%s' trust='%s'",
+            self.manifest.name,
+            hook_name,
+            source,
+            "default" if source in ("bundled", "user") else "explicit-opt-in",
+        )
+        return handle
 
     def register_middleware(self, kind: str, callback: Callable) -> PluginRegistration:
         """Register behavior-changing middleware (request kinds rewrite the payload, execution kinds
