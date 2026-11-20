@@ -104,6 +104,9 @@ def test_load_records_skips_malformed(tmp_path: Path) -> None:
 
 TS0 = "2026-08-01T00:00:00Z"
 TS1 = "2026-08-02T00:00:00Z"
+# The scanner resolves fresh conflicts only (MAX_OLDER_AGE_DAYS window). Pin "now" beside the
+# fixtures so these cases do not rot into archaeology as the wall clock moves on.
+NOW = datetime(2026, 8, 3, tzinfo=timezone.utc)
 
 
 def _tq(
@@ -151,7 +154,7 @@ def test_scan_detects_newer_overrides_older() -> None:
         _tq("n1", "Tool X failure", TS0),
         _tq("n2", "Tool X failure", TS1),
     ]
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert len(props) == 1
     p = props[0]
     assert p["older_id"] == "n1" and p["newer_id"] == "n2"
@@ -165,7 +168,7 @@ def test_scan_reversed_timestamps_flip_roles() -> None:
         _tq("n1", "Tool X failure", TS1),  # newer timestamp, listed first
         _tq("n2", "Tool X failure", TS0),  # older timestamp
     ]
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert len(props) == 1
     assert props[0]["older_id"] == "n2" and props[0]["newer_id"] == "n1"
 
@@ -176,7 +179,7 @@ def test_scan_three_active_newest_wins_for_all() -> None:
         _tq("n2", "Tool X failure", TS1),
         _tq("n3", "Tool X failure", "2026-08-03T00:00:00Z"),
     ]
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert len(props) == 2
     assert {p["older_id"] for p in props} == {"n1", "n2"}
     assert all(p["newer_id"] == "n3" for p in props)
@@ -187,7 +190,7 @@ def test_scan_superseded_older_is_inert() -> None:
         _tq("n1", "Tool X failure", TS0, status=SUPERSEDED_NOTE_STATUS),
         _tq("n2", "Tool X failure", TS1),
     ]
-    assert scan_tqmemory_contradictions(notes) == []
+    assert scan_tqmemory_contradictions(notes, now=NOW) == []
 
 
 def test_scan_identical_timestamps_skipped() -> None:
@@ -195,7 +198,7 @@ def test_scan_identical_timestamps_skipped() -> None:
         _tq("n1", "Tool X failure", TS0),
         _tq("n2", "Tool X failure", TS0),
     ]
-    assert scan_tqmemory_contradictions(notes) == []
+    assert scan_tqmemory_contradictions(notes, now=NOW) == []
 
 
 def test_scan_missing_created_at_skipped() -> None:
@@ -203,7 +206,7 @@ def test_scan_missing_created_at_skipped() -> None:
         _tq("n1", "Tool X failure", TS0),
         _tq("n2", "Tool X failure", "not-a-date"),
     ]
-    assert scan_tqmemory_contradictions(notes) == []
+    assert scan_tqmemory_contradictions(notes, now=NOW) == []
 
 
 def test_scan_untitled_notes_skipped() -> None:
@@ -212,7 +215,7 @@ def test_scan_untitled_notes_skipped() -> None:
         _tq("n2", "Tool X failure", TS0),
         _tq("n3", "Tool X failure", TS1),
     ]
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert len(props) == 1
     assert props[0]["older_id"] == "n2" and props[0]["newer_id"] == "n3"
 
@@ -239,7 +242,7 @@ def test_apply_writes_superseded_record_and_is_idempotent(tmp_path: Path) -> Non
             _tq("n2", "Tool X failure", TS1),
         ],
     )
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert apply_tqmemory_deprecations(notes, props) == 1
 
     on_disk = json.loads(Path(notes[0]["source_path"]).read_text(encoding="utf-8"))
@@ -264,7 +267,7 @@ def test_apply_dry_run_writes_nothing(tmp_path: Path) -> None:
             _tq("n2", "Tool X failure", TS1),
         ],
     )
-    props = scan_tqmemory_contradictions(notes)
+    props = scan_tqmemory_contradictions(notes, now=NOW)
     assert apply_tqmemory_deprecations(notes, props, dry_run=True) == 1
     on_disk = json.loads(Path(notes[0]["source_path"]).read_text(encoding="utf-8"))
     assert on_disk["note_status"] == "active"
@@ -297,7 +300,7 @@ def test_dream_contradiction_scan_end_to_end(tmp_path: Path) -> None:
             _tq("n3", "Lone note", TS1),
         ],
     )
-    summary = dream_contradiction_scan(tmp_path)
+    summary = dream_contradiction_scan(tmp_path, now=NOW)
     assert summary["notes_scanned"] == 3
     assert summary["active_notes"] == 3
     assert summary["contradictions_found"] == 1
@@ -306,7 +309,7 @@ def test_dream_contradiction_scan_end_to_end(tmp_path: Path) -> None:
     assert summary["proposals"][0]["older_id"] == "n1"
 
     # Second run: nothing left to do.
-    again = dream_contradiction_scan(tmp_path)
+    again = dream_contradiction_scan(tmp_path, now=NOW)
     assert again["contradictions_found"] == 0
     assert again["deprecations_applied"] == 0
 
@@ -319,7 +322,7 @@ def test_dream_contradiction_scan_dry_run(tmp_path: Path) -> None:
             _tq("n2", "Tool X failure", TS1),
         ],
     )
-    summary = dream_contradiction_scan(tmp_path, dry_run=True)
+    summary = dream_contradiction_scan(tmp_path, dry_run=True, now=NOW)
     assert summary["contradictions_found"] == 1
     assert summary["deprecations_applied"] == 1
     assert summary["dry_run"] is True
