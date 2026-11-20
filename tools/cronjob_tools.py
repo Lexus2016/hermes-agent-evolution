@@ -4,11 +4,13 @@
 import contextlib
 import json
 import logging
+import shutil
+import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import Future
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import copy
 
@@ -181,16 +183,18 @@ def _cron_preflight_check() -> Optional[str]:
     internal JSON scheduler only, we still verify that the cron directory is
     writable so job persistence does not fail silently.
     """
-    from cron.jobs import CRON_DIR, ensure_dirs
+    from cron.jobs import CRON_DIR, _current_cron_store, ensure_dirs
 
+    cron_dir = CRON_DIR
     try:
         ensure_dirs()
-        probe = CRON_DIR / ".preflight_probe"
+        cron_dir = _current_cron_store().cron_dir
+        probe = cron_dir / ".preflight_probe"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except Exception as exc:
         return (
-            f"Cron directory is not writable ({CRON_DIR}): {exc}. "
+            f"Cron directory is not writable ({cron_dir}): {exc}. "
             "Check permissions for the user running Hermes."
         )
 
@@ -1243,13 +1247,38 @@ def cronjob(
     timezone: Optional[str] = None,
     grace_minutes: Optional[int | str] = None) -> str:
     """Unified cron job management tool."""
+    # Retry-rate limiter: noisy failure loops are capped per task.
+    # Only *check* the current streak — do NOT increment here. The counter
+    # is incremented only on actual failures and reset on success.
+    failure_streak = _get_cron_failure_streak(task_id)
+    if failure_streak > _MAX_CONSECUTIVE_CRON_FAILURES:
+        return tool_error(
+            f"Cron tool has failed {failure_streak} consecutive times for this task "
+            "(too many attempts). Please inspect the earlier errors or run "
+            "cronjob(action='list') before retrying.",
+            success=False,
+        )
+
+    # Preflight: ensure cron is available before invoking backend operations.
+    preflight_error = _cron_preflight_check()
+    if preflight_error:
+        _record_cron_failure(task_id)
+        return tool_error(preflight_error, success=False)
+
     a = dict(locals())
     del a["task_id"]  # unused but kept for handler signature compatibility
     try:
         normalized = (action or "").strip().lower()
         handler = _JOBLESS_ACTIONS.get(normalized)
         if handler is not None:
-            return handler(a)
+            res = handler(a)
+            try:
+                _res_obj = json.loads(res)
+                if isinstance(_res_obj, dict) and _res_obj.get("success"):
+                    _reset_cron_failure(task_id)
+            except Exception:
+                pass
+            return res
         if not job_id:
             return tool_error(f"job_id is required for action '{normalized}'", success=False)
         # Job resolution precedes the action check (an unknown action on a missing job
