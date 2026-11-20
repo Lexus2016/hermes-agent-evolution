@@ -731,6 +731,53 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                 return tick
             else:
                 self._filter_and_accumulate(item)
+                if self._deferred_break_now_due():
+                    tick.got_segment_break = True
+                    return tick
+
+    def _deferred_break_now_due(self) -> bool:
+        """Whether a deferred segment break has become due: its message has fully landed.
+
+        Firing it here rather than waiting for the next boundary is what keeps the FOLLOWING round
+        clean: the break resets the segment, so the next round's text accumulates from empty and its
+        own break is judged against its own text instead of the previous round's.
+        """
+        pending = self._pending_break_text
+        if not pending or not _collapse_ws(self._accumulated).endswith(pending):
+            return False
+        self._pending_break_text = ""
+        return True
+
+    def _segment_still_streaming(self, authoritative: str) -> bool:
+        """Whether this break would seal a message whose own deltas are still arriving.
+
+        The caller decides a segment is over from the COMPLETED assistant message, while its deltas
+        may still be in flight, and its "already streamed" test is a PREFIX match
+        (``agent/stream_delivery.py``) -- true even when only a few characters have landed. Sealing
+        then publishes a fragment as a finished message and pushes the remainder into the next one,
+        which is how one sentence appeared split mid-word.
+
+        So the break is DROPPED while what is held is a strict prefix of the authoritative text: the
+        remaining deltas land in the same message, and the next boundary (the following round's
+        break, or the turn's finalize) closes it. Nothing is rewritten here -- adopting the text
+        instead would publish the full sentence and then the still-arriving tail a second time.
+
+        Whitespace is collapsed for the comparison so the paragraph break the agent prepends after a
+        tool iteration cannot defeat the match. A divergent segment is a DIFFERENT message, not an
+        incomplete one, so its break is honoured as before.
+        """
+        if not isinstance(authoritative, str) or not authoritative:
+            return False
+        held = _collapse_ws(self._accumulated)
+        if not held:
+            return False  # nothing on screen to keep open
+        norm_auth = _collapse_ws(authoritative)
+        if norm_auth == held or not norm_auth.startswith(held):
+            return False
+        logger.debug("Segment break deferred: holding %d of %d chars, rest still streaming",
+                     len(held), len(norm_auth))
+        self._pending_break_text = norm_auth
+        return True
 
     def _adopt_recovered_reply(self, final_raw: str) -> bool:
         """Reconcile a marker-followed reply against its own prior segment, not older commentary."""
