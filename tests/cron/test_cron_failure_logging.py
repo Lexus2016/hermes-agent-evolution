@@ -96,7 +96,19 @@ def test_list_and_get_latest_failure(tmp_path):
     assert all_records[1]["error"] == "first"
 
 
+
+def _run_in_process(monkeypatch):
+    """Run the fire body in this process.
+
+    Since v0.23.1 an agent fire crosses the restart-safe worker seam, so a bare
+    ``run_one_job`` only hands the attempt off; these tests observe the body's
+    own bookkeeping, so they take the no-worker path explicitly.
+    """
+    monkeypatch.setattr(scheduler, "_launch_external_cron_worker", lambda job: False)
+
 def test_run_one_job_writes_failure_record_on_agent_failure(monkeypatch):
+    _run_in_process(monkeypatch)
+
     def fake_run_job(job, **kw):
         return False, "agent output", "", "provider 429 rate limit"
 
@@ -123,6 +135,8 @@ def test_run_one_job_skips_failure_record_on_success(monkeypatch):
     Previously, success=true records flooded the directory making it useless.
     Now only genuine failures get persisted.
     """
+    _run_in_process(monkeypatch)
+
     def fake_run_job(job, **kw):
         return True, "all good", "final response", None
 
@@ -193,6 +207,8 @@ def test_build_digest_ignores_success_records_and_old_failures(monkeypatch, tmp_
 
 
 def test_run_one_job_failure_record_logs_warning(caplog, monkeypatch):
+    _run_in_process(monkeypatch)
+
     def fake_run_job(job, **kw):
         return False, "out", "", "bang"
 

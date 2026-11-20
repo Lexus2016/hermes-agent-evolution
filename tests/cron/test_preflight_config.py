@@ -480,12 +480,14 @@ class TestBalanceLowBlock:
     def test_single_alert_across_two_ticks_and_balance_low_status(self, tmp_path):
         """Two ticks of a balance-low job deliver exactly ONE alert and
         persist last_status='balance_low' in jobs.json (#2872)."""
-        job = _job()
+        # A real notice lane: v0.23.1 never sends for ``local`` (output only), and
+        # the alert-once contract is about a notice leaving the host.
+        job = _job(failure_deliver="slack:alerts")
         deliveries = []
 
-        def fake_deliver(job, content, adapters=None, loop=None, **kwargs):
+        def fake_deliver(execution_id, job, content, **kwargs):
             deliveries.append(content)
-            return None
+            return {"status": "pending"}
 
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
@@ -504,7 +506,7 @@ class TestBalanceLowBlock:
                          "cron.scheduler._preflight_check_provider_balance",
                          return_value=self._balance_reason(),
                      ), \
-                     patch.object(sched, "_deliver_result", side_effect=fake_deliver), \
+                     patch("cron.delivery_queue.enqueue", side_effect=fake_deliver), \
                      patch("run_agent.AIAgent") as mock_agent_cls:
                     ok = sched.run_one_job(fresh)
                     assert ok is True

@@ -13,6 +13,8 @@ RuntimeError re-raises from the guard and is then handled by the outer
 tuple with a different error message.
 """
 
+import concurrent.futures
+import inspect
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,27 +34,43 @@ class TestCronPoolShutdownGuard:
             "prompt": "hello world",
         }
 
-    def _common_patches(self, cron_pool):
-        """Build patch context that lets run_job reach the _cron_pool.submit
-        site.  _run_job_impl creates two ThreadPoolExecutors: the first for
-        the session DB pool (~line 3554), the second for the cron pool
-        (~line 4322).  We return a normal pool for the first and the
-        configured ``cron_pool`` (whose submit may raise) for the second.
-        """
-        normal_pool = MagicMock()
-        call_state = {"count": 0}
+    def _common_patches(self, cron_pool, job):
+        """Build patch context that lets run_job reach the ``_cron_pool.submit`` site.
 
-        def counting_factory(*args, **kwargs):
-            call_state["count"] += 1
-            # First call: session DB pool — return a normal pool.
-            # Second call: cron pool — return the test-configured pool.
-            if call_state["count"] == 1:
-                return normal_pool
-            return cron_pool
+        v0.23.1 creates more than one executor on this path (the session store's,
+        and the persistent ``cron-parallel`` pool), so identify the agent pool by
+        what it is instead of by creation order: the session store is stubbed out
+        and any ``cron-parallel`` executor is a plain stand-in.
+        """
+        real_pool_cls = concurrent.futures.ThreadPoolExecutor
+
+        def pool_factory(*args, **kwargs):
+            # Only the agent executor created inside cron/scheduler.py is replaced;
+            # every other executor (session store, the persistent cron-parallel pool,
+            # mock internals) stays a real one so nothing else sees a fake future.
+            # side_effect runs inside unittest.mock, so the creation site is found
+            # by walking a few frames rather than by the immediate caller.
+            frames = inspect.stack()[1:8]
+            from_scheduler = bool(
+                not kwargs.get("thread_name_prefix")
+                and any(f.filename.endswith("cron/scheduler.py") for f in frames)
+            )
+            if from_scheduler:
+                return cron_pool
+            return real_pool_cls(*args, **kwargs)
 
         tpe_patch = patch(
             "concurrent.futures.ThreadPoolExecutor",
-            side_effect=counting_factory,
+            side_effect=pool_factory,
+        )
+        # Own the fire in this process: an unowned agent fire is handed to the
+        # gateway (which v0.23.1 will try to start) instead of running here.
+        owner_patch = patch(
+            "gateway.session_cron.current_execution",
+            return_value=(MagicMock(), "pool-test-session", job["id"], None),
+        )
+        session_db_patch = patch(
+            "cron.scheduler._open_cron_session_db", return_value=MagicMock()
         )
         cfg_patch = patch("cron.scheduler.load_config", return_value={})
         runtime_patch = patch(
@@ -67,7 +85,8 @@ class TestCronPoolShutdownGuard:
         )
         aiaagent_patch = patch("run_agent.AIAgent", return_value=MagicMock())
         mcp_patch = patch("tools.mcp_tool.discover_mcp_tools", return_value=[])
-        return [tpe_patch, cfg_patch, runtime_patch, aiaagent_patch, mcp_patch]
+        return [tpe_patch, owner_patch, session_db_patch, cfg_patch, runtime_patch,
+                aiaagent_patch, mcp_patch]
 
     def test_shutdown_runtimeerror_returns_clean_failure(self):
         """When _cron_pool.submit() raises the interpreter-shutdown
@@ -79,13 +98,12 @@ class TestCronPoolShutdownGuard:
             "cannot schedule new futures after interpreter shutdown"
         )
 
-        patches = self._common_patches(cron_pool)
+        job = self._make_agent_path_job()
+        patches = self._common_patches(cron_pool, job)
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = sched.run_job(
-                self._make_agent_path_job()
-            )
+            success, output, final_response, error = sched.run_job(job)
         finally:
             for p in patches:
                 p.stop()
@@ -112,13 +130,12 @@ class TestCronPoolShutdownGuard:
         cron_pool = MagicMock()
         cron_pool.submit.side_effect = RuntimeError("something else entirely")
 
-        patches = self._common_patches(cron_pool)
+        job = self._make_agent_path_job()
+        patches = self._common_patches(cron_pool, job)
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = sched.run_job(
-                self._make_agent_path_job()
-            )
+            success, output, final_response, error = sched.run_job(job)
         finally:
             for p in patches:
                 p.stop()

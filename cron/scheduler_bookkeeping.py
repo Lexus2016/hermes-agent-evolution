@@ -55,12 +55,34 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
     ``d`` is the scheduler's ``_RunDelivery``. Store and ledger writers are read off the
     ``cron.scheduler`` facade, which is where tests and the receipt-recovery path patch them."""
     from cron import scheduler
+    logger = scheduler.logger
     job = d.job
+    # Per-job failure record (#433): a real failure leaves a durable record under
+    # cron/failures/ so the digest and `hermes cron failures` can name it. Success
+    # records stay suppressed (#1390): they flooded the directory and the digest
+    # only ever reads success=False rows.
+    if not d.success:
+        try:
+            from cron.jobs import save_job_failure
+
+            save_job_failure(
+                job,
+                success=False,
+                error=d.error,
+                output=(d.output or ""),
+            )
+            logger.warning("Job '%s' failure record saved to cron/failures", job.get("id"))
+        except Exception as _fe:
+            logger.error("Could not save cron failure record: %s", _fe)
+
     if not d.should_deliver and job.get("last_delivery_queued"):
         from cron.jobs import update_job
         update_job(job["id"], {"last_delivery_queued": None})
         job["last_delivery_queued"] = None
     mark_kwargs: dict = {"delivery_error": d.delivery_error}
+    _run_tool_calls = job.pop("_last_run_tool_calls", None)
+    if _run_tool_calls is not None:
+        mark_kwargs["tool_calls"] = _run_tool_calls
     from cron.scheduler_authority import journal_path
     journal = journal_path(job['id'], execution_id)
     if not job.get('no_agent'):
@@ -84,6 +106,14 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
         mark_kwargs["expected_fire_owner"] = fire_owner
     if d.blocked_config:
         mark_kwargs["status"] = "blocked_config"
+    elif d.balance_low:
+        # #2872: a 402 park is its own status, never a generic "error", so the job
+        # list and the balance recheck can both tell why it stopped.
+        mark_kwargs["status"] = "balance_low"
+    elif d.drift_skip:
+        # #44585: an unpinned job skipped by the model/provider drift guard records
+        # drift_skip, which `cron repin --drifted` and the dashboard filter on.
+        mark_kwargs["status"] = "drift_skip"
     # A run that removed its own record has nothing left to mark; the delivery above is its result.
     marked = scheduler.self_removal_delivery_allowed(job["id"]) or scheduler.mark_job_run(
         job["id"], d.success, d.error, **mark_kwargs)

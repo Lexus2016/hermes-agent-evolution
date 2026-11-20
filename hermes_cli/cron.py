@@ -1042,6 +1042,84 @@ def cron_cancel(args) -> int:
     return 0
 
 
+def cron_repin(args) -> int:
+    """Re-pin unpinned or drifted jobs to the active global provider/model (#3095).
+
+    ``--pin`` hard-pins the resolved provider/model on the job and clears its snapshots;
+    without it the baseline snapshots move to the current global resolution and the job
+    keeps tracking it. The drift guard's own remediation text points here.
+    """
+    from cron.jobs import repin_jobs
+
+    job_id = getattr(args, "job_id", None)
+    all_jobs = bool(getattr(args, "all", False))
+    drifted = bool(getattr(args, "drifted", False))
+    pin = bool(getattr(args, "pin", False))
+    if job_id and all_jobs:
+        print(color("Cannot specify both a job ID and --all.", Colors.RED))
+        return 1
+    if not job_id and not all_jobs and not drifted:
+        print(color("Specify a job ID, --all, or --drifted.", Colors.RED))
+        return 1
+    updated = repin_jobs(
+        # ``--drifted`` alone means "every job that is drifted right now".
+        job_ids=[job_id] if job_id else None,
+        drifted_only=drifted,
+        pin_explicitly=pin,
+    )
+    if not updated:
+        print(color("No jobs needed re-pinning.", Colors.YELLOW))
+        return 0
+    if pin:
+        print(color(f"Pinned {len(updated)} job{'s' if len(updated) != 1 else ''}", Colors.GREEN))
+    else:
+        print(color(
+            f"Re-pinned baseline for {len(updated)} job{'s' if len(updated) != 1 else ''}",
+            Colors.GREEN))
+    for job in updated:
+        provider = job.get("provider") or job.get("provider_snapshot") or "-"
+        model = job.get("model") or job.get("model_snapshot") or "-"
+        print(f"  {job['id']}  (provider={provider}, model={model})")
+    return 0
+
+
+def cron_resnap(args) -> int:
+    """Adopt the current global inference resolution for unpinned jobs (#44585).
+
+    The job stays unpinned, so it keeps tracking later global changes. This is the
+    companion to ``repin`` that the creation-snapshot log line points at.
+    """
+    from cron.jobs import resnapshot_all_unpinned, resnapshot_job
+
+    job_id = getattr(args, "job_id", None)
+    all_jobs = bool(getattr(args, "all", False))
+    if job_id and all_jobs:
+        print(color("Cannot specify both a job ID and --all.", Colors.RED))
+        return 1
+    if not job_id and not all_jobs:
+        print(color("Specify a job ID or --all.", Colors.RED))
+        return 1
+    if all_jobs:
+        updated = resnapshot_all_unpinned()
+    else:
+        job = resnapshot_job(job_id)
+        if job is None:
+            print(color(f"Job not found: {job_id}", Colors.RED))
+            return 1
+        updated = [job]
+    if not updated:
+        print(color("No unpinned jobs to re-snapshot.", Colors.YELLOW))
+        return 0
+    print(color(
+        f"Re-snapped {len(updated)} job{'s' if len(updated) != 1 else ''} to the current "
+        "global resolution (still unpinned)",
+        Colors.GREEN))
+    for job in updated:
+        print(f"  {job['id']}  (provider={job.get('provider_snapshot') or '-'}, "
+              f"model={job.get('model_snapshot') or '-'})")
+    return 0
+
+
 # Late-bound lambdas keep module-level monkeypatching working; list/status/runs return None -> 0.
 _CRON_SUBCOMMANDS = {
     "list": lambda a: cron_list(getattr(a, "all", False)) or 0,
@@ -1057,6 +1135,8 @@ _CRON_SUBCOMMANDS = {
     "resume": lambda a: cron_resume(a),
     "run": lambda a: _job_action("run", a.job_id, "Triggered"),
     "cancel": lambda a: cron_cancel(a),
+    "repin": lambda a: cron_repin(a),
+    "resnap": lambda a: cron_resnap(a),
     "remove": lambda a: _job_action("remove", a.job_id, "Removed"),
 }
 _CRON_SUBCOMMANDS["history"] = _CRON_SUBCOMMANDS["runs"]
@@ -1071,5 +1151,6 @@ def cron_command(args):
     if handler is not None:
         return handler(args)
     print(f"Unknown cron command: {subcmd}\n"
-          "Usage: hermes cron [list|create|edit|pause|resume|run|cancel|remove|status|runs|doctor|tick]")
+          "Usage: hermes cron [list|create|edit|pause|resume|run|cancel|remove|repin|resnap"
+          "|status|runs|doctor|tick]")
     sys.exit(1)

@@ -3425,6 +3425,52 @@ def _run_job_impl(
     ``extra_prompt``: optional per-run context from ``cronjob(action='run', prompt=...)`` (#57331). Appended
     to the stored prompt for this fire only — never persisted to the job definition.
     """
+    # Halt-state gate (#913): scripts/evolution_funnel.py writes halt-state.txt once
+    # the pipeline has produced zero merged PRs for 5+ consecutive cycles AND zero
+    # selections for 3+ cycles. A structurally halted pipeline must skip its
+    # expensive stage crons before any transport hop, provider ping or agent build.
+    from cron import evolution_preflight
+
+    _halt_stage: Optional[str] = None
+    _halted_for_gate = False
+    try:
+        _halt_stage = evolution_preflight.evolution_job_stage(job)
+        _halted_for_gate = bool(_halt_stage) and evolution_preflight.should_skip_for_halt(
+            _halt_stage, _get_hermes_home()
+        )
+    except Exception as exc:  # pragma: no cover - defense in depth
+        logger.debug(
+            "Job '%s': halt-state gate classification failed, proceeding without it: %s",
+            job.get("id"), exc,
+        )
+        _halt_stage = None
+        _halted_for_gate = False
+
+    if _halted_for_gate:
+        _halt_job_id = job["id"]
+        _halt_job_name = str(job.get("name") or job.get("prompt") or _halt_job_id or "cron job")
+        logger.info(
+            "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is halted "
+            "(halt-state.txt present). No LLM agent was spawned. The pipeline resumes "
+            "automatically once the funnel job clears the halt (merged/selected recover), "
+            "or the file can be removed manually.",
+            _halt_job_id,
+            _halt_stage,
+        )
+        _halt_doc = (
+            f"# Cron Job: {_halt_job_name}\n\n"
+            f"**Job ID:** {_halt_job_id}\n"
+            f"**Run Time:** {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "**Status:** silent (evolution pipeline halted)\n\n"
+            "The evolution pipeline is halted (zero merged PRs for 5+ "
+            "cycles and zero selections for 3+ cycles — see "
+            "scripts/evolution_funnel.py). This expensive LLM stage was "
+            "skipped to avoid burning tokens on a structurally blocked "
+            "pipeline. `funnel` keeps running and will clear the halt "
+            "automatically once metrics recover.\n"
+        )
+        return True, _halt_doc, SILENT_MARKER, None
+
     from gateway.session_cron import current_execution
     owner_execution = current_execution()
     if owner_execution is not None and owner_execution[2:] != (job['id'], execution_id):
@@ -3502,6 +3548,9 @@ def _run_job_impl(
         result = _run_agent_with_watchdog(
             agent, prompt, job, job_id, job_name, scope.task_id, cancel_event,
             worker_state=_worker_state)
+        # #701: carry this run's tool-call count to the terminal booking so the job
+        # record can tell a legitimately idle stage from a silently no-op'd one.
+        job["_last_run_tool_calls"] = _count_tool_calls(result.get("messages"))
         final_response = _final_response_from_result(result, job_id, job_name, AIAgent, agent=agent)
         if (setup.fallback_notice and final_response.strip() and not _is_cron_silence_response(final_response)
                 and _cron_failure_marker_error(final_response) is None):

@@ -2972,6 +2972,7 @@ def mark_job_run(
     ladder_rung: bool = False,
     quota_hold_seconds: Optional[float] = None,
     recover_consumed_fire: bool = False,
+    tool_calls: Optional[int] = None,
 ) -> bool:
     """Mark a job as run: update last_run_at/last_status, bump completed, recompute next_run_at,
     and retire the record as a terminal completion when the repeat limit is reached. A manual run
@@ -2994,6 +2995,10 @@ def mark_job_run(
     it on every tick. ``recover_consumed_fire`` lets a scheduled sparse cron recover its
     consumed fire when the provider reopens; manual runs retain the natural schedule
     (cron/quota_hold.py, #89376).
+
+    ``tool_calls``: how many tool calls this run made (#701). Persisted as ``last_tool_calls`` so
+    the dashboard can tell a legitimately idle stage from a silently no-op'd one; None leaves
+    the previous value alone.
     """
     def apply(jobs, _i, job):
         if execution_id is not None and execution_id in job.get("canonical_completions", []):
@@ -3018,6 +3023,8 @@ def mark_job_run(
             save_jobs(jobs)
             return True
         _record_run_outcome(job, success, error, delivery_error, status, now)
+        if tool_calls is not None:
+            job["last_tool_calls"] = int(tool_calls)
         job.update(held)  # a run-now queued mid-run is its own fire, not this one
         if execution_id is not None:  # retire ids recovery can no longer replay; latest stays last
             from cron.scheduler_authority import replayable_completions as live
@@ -3026,47 +3033,56 @@ def mark_job_run(
             extra_fire.settle(job, now)
         else:
             _advance_after_run(job, now, ladder_rung=ladder_rung)
-        from cron import quota_hold
-        from cron.unreachable_retry import clear_state, plan_retry
+            # #3498: a booked scheduled run never leaves its slot behind for restore loops;
+            # a manual fire keeps it (extra_fire.settle owns that contract).
+            job.pop("pending_slot", None)
+        try:
+            from cron import quota_hold
+            from cron.unreachable_retry import clear_state, plan_retry
 
-        if not success and model_unreachable and not is_terminal_job(job):
-            plan_retry(job)
-        else:
-            # Any run that reached the model (either outcome) resets the re-run ladder.
-            clear_state(job)
-            # #70: apply failure backoff (skip scheduled slots) and, past the
-            # auto-pause threshold, pause the job for operator review instead of
-            # retrying a deterministic failure indefinitely. Unreachable retries
-            # own next_run_at via plan_retry above -- do not also skip slots or
-            # auto-pause that path; a manual extra fire keeps its own occurrence.
-            if (
-                not success
-                and not extra
-                and status != "cancelled"
-                and status not in _SYNTHETIC_FAILURE_STATUSES
-            ):
-                _skips = int(job.get("failure_backoff_skips") or 0)
-                if _skips > 0 and job.get("next_run_at") is not None:
-                    job["next_run_at"] = _advance_schedule_by_steps(
-                        job["schedule"], job["next_run_at"], _skips
-                    )
+            if not success and model_unreachable and not is_terminal_job(job):
+                plan_retry(job)
+            else:
+                # Any run that reached the model (either outcome) resets the re-run ladder.
+                clear_state(job)
+                # #70: apply failure backoff (skip scheduled slots) and, past the
+                # auto-pause threshold, pause the job for operator review instead of
+                # retrying a deterministic failure indefinitely. Unreachable retries
+                # own next_run_at via plan_retry above -- do not also skip slots or
+                # auto-pause that path; a manual extra fire keeps its own occurrence.
                 if (
-                    int(job.get("failure_streak") or 0)
-                    >= _failure_auto_pause_threshold()
+                    not success
+                    and not extra
+                    and status != "cancelled"
+                    and status not in _SYNTHETIC_FAILURE_STATUSES
                 ):
-                    job["enabled"] = False
-                    job["state"] = "paused"
-                    job["paused_at"] = now
-                    job["paused_reason"] = (
-                        "auto-paused after %d identical consecutive "
-                        "failures (last error: %.200s) — resume to retry"
-                        % (int(job["failure_streak"]), error or "")
-                    )
-                    job["next_run_at"] = None
-        if not success and quota_hold_seconds and not is_terminal_job(job):
-            quota_hold.plan_hold(job, quota_hold_seconds, recover_consumed_fire=recover_consumed_fire)
-        else:
-            quota_hold.clear_state(job)
+                    _skips = int(job.get("failure_backoff_skips") or 0)
+                    if _skips > 0 and job.get("next_run_at") is not None:
+                        job["next_run_at"] = _advance_schedule_by_steps(
+                            job["schedule"], job["next_run_at"], _skips
+                        )
+                    if (
+                        int(job.get("failure_streak") or 0)
+                        >= _failure_auto_pause_threshold()
+                    ):
+                        job["enabled"] = False
+                        job["state"] = "paused"
+                        job["paused_at"] = now
+                        job["paused_reason"] = (
+                            "auto-paused after %d identical consecutive "
+                            "failures (last error: %.200s) — resume to retry"
+                            % (int(job["failure_streak"]), error or "")
+                        )
+                        job["next_run_at"] = None
+            if not success and quota_hold_seconds and not is_terminal_job(job):
+                quota_hold.plan_hold(job, quota_hold_seconds, recover_consumed_fire=recover_consumed_fire)
+            else:
+                quota_hold.clear_state(job)
+        except Exception:
+            # #3498: retry/backoff post-processing must never wedge the booking -- a raised
+            # plan_retry would otherwise leave pending_slot behind and the restore loop returns.
+            logger.exception(
+                "mark_job_run: error in failure/retry post-processing for job %s", job_id)
         save_jobs(jobs)
         return True
 
