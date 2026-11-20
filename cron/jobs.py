@@ -2843,17 +2843,33 @@ def _record_run_outcome(
     job["last_status"] = status or (
         "error" if not success else ("delivery_failed" if delivery_failed else "ok"))
     cancelled = status == "cancelled"  # an operator stop is not a failure
+    synthetic = status in _SYNTHETIC_FAILURE_STATUSES
+    _prev_err = job.get("last_error")
     job["last_error"] = None if success or cancelled else error
     if success:
         # Healthy run: drop the alert-once dedup markers so a FUTURE break re-alerts, and clear
         # the forward-failure stamp so it only describes CURRENT auto-fire health.
         job.pop("preflight_alerted", None)
         job.pop("last_fire_error", None)
+        job.pop("failure_backoff_skips", None)
         job["failure_streak"] = 0
+    elif synthetic:
+        # #70: a scheduler restart / forced release mark is recorded in
+        # last_status/last_error but is not evidence of a deterministic job
+        # failure, so it must not advance the streak nor trip auto-pause.
+        pass
     elif not cancelled:
         # Consecutive agent-failure streak; delivery failures do NOT count
-        # (scheduler._failure_streak_nudge).
-        job["failure_streak"] = int(job.get("failure_streak") or 0) + 1
+        # (scheduler._failure_streak_nudge). Byte-identical errors increment the
+        # streak; a changed error restarts it at 1 (#70).
+        _same = bool(_prev_err) and error == _prev_err
+        job["failure_streak"] = (
+            int(job.get("failure_streak") or 0) + 1 if _same else 1
+        )
+        _streak = int(job["failure_streak"])
+        job["failure_backoff_skips"] = min(
+            2 ** (_streak - 1) - 1, _failure_backoff_max_skips()
+        )
         # Sticky last-failure stamp (#118354): the next success resets last_status and
         # failure_streak, which erases the only job-level trace that a run ever failed —
         # a monitor sampling jobs.json then sees a permanently green job. last_failure
@@ -2986,6 +3002,35 @@ def mark_job_run(
         else:
             # Any run that reached the model (either outcome) resets the re-run ladder.
             clear_state(job)
+            # #70: apply failure backoff (skip scheduled slots) and, past the
+            # auto-pause threshold, pause the job for operator review instead of
+            # retrying a deterministic failure indefinitely. Unreachable retries
+            # own next_run_at via plan_retry above -- do not also skip slots or
+            # auto-pause that path; a manual extra fire keeps its own occurrence.
+            if (
+                not success
+                and not extra
+                and status != "cancelled"
+                and status not in _SYNTHETIC_FAILURE_STATUSES
+            ):
+                _skips = int(job.get("failure_backoff_skips") or 0)
+                if _skips > 0 and job.get("next_run_at") is not None:
+                    job["next_run_at"] = _advance_schedule_by_steps(
+                        job["schedule"], job["next_run_at"], _skips
+                    )
+                if (
+                    int(job.get("failure_streak") or 0)
+                    >= _failure_auto_pause_threshold()
+                ):
+                    job["enabled"] = False
+                    job["state"] = "paused"
+                    job["paused_at"] = now
+                    job["paused_reason"] = (
+                        "auto-paused after %d identical consecutive "
+                        "failures (last error: %.200s) — resume to retry"
+                        % (int(job["failure_streak"]), error or "")
+                    )
+                    job["next_run_at"] = None
         if not success and quota_hold_seconds and not is_terminal_job(job):
             quota_hold.plan_hold(job, quota_hold_seconds, recover_consumed_fire=recover_consumed_fire)
         else:
