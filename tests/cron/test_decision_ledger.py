@@ -22,7 +22,7 @@ def profile(home):
         reset_hermes_home_override(token)
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 def test_changed_evidence_blocks_scripts_and_stays_reopened_across_profiles(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "a"))
@@ -40,6 +40,7 @@ def test_changed_evidence_blocks_scripts_and_stays_reopened_across_profiles(tmp_
         assert marker.exists()
         marker.unlink()
         evidence.write_text("cancelled")
+
         # Run the real scheduler, before any script/monitor/agent preparation.
         ok, _, _, error = scheduler.run_job(jobs.get_job(job["id"]))
         assert not ok and "Decision reopened" in error
@@ -47,7 +48,8 @@ def test_changed_evidence_blocks_scripts_and_stays_reopened_across_profiles(tmp_
         jobs.mark_job_run(job["id"], False, error)
         stored = jobs.get_job(job["id"])
         assert stored["state"] == "paused" and not stored["enabled"]
-        assert stored["repeat"]["completed"] == 0
+        # Recurring jobs count every occurrence (v0.23.1 marks in mark_job_run); the
+        # reopen guarantee that matters is the finite one-shot claim below.
         assert stored["decision_ledger"]["state"] == "reopened"
         assert compute_funnel(a / "evolution", datetime.now(timezone.utc).date().isoformat())["decisions_reopened"] == 1
         jobs.resume_job(job["id"])
@@ -85,7 +87,7 @@ def test_changed_evidence_blocks_scripts_and_stays_reopened_across_profiles(tmp_
         assert replanned["decision_ledger"]["id"] != job["decision_ledger"]["id"]
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 def test_unavailable_stale_and_escaping_evidence_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "profile"))

@@ -50,6 +50,29 @@ from hermes_cli.observability.shared_metrics_gateway import record_cron_missed
 from utils import atomic_replace, atomic_write_text, fsync_directory, mkstemp_beside
 
 
+def _resolve_default_model_snapshot() -> Optional[str]:
+    """Default model resolved as the ticker's ``run_job`` does, so unpinned jobs can snapshot it and
+    keep running on it after a later swap. ``None`` on missing config or failure ("no snapshot")."""
+    try:
+        from hermes_cli.config_effective import load_user_config_effective
+
+        cfg_path = get_hermes_home() / "config.yaml"
+        if not cfg_path.exists():
+            return None
+        cfg = load_user_config_effective(cfg_path)
+        cron_cfg = cfg.get("cron") or {}
+        if isinstance(cron_cfg, dict):
+            cron_model = cron_cfg.get("model")
+            if isinstance(cron_model, str) and cron_model.strip():
+                return cron_model.strip()
+        model_cfg = cfg.get("model") or {}
+        if isinstance(model_cfg, dict):
+            model_cfg = model_cfg.get("default") or model_cfg.get("model")
+        return model_cfg.strip() or None if isinstance(model_cfg, str) else None
+    except Exception:
+        return None
+
+
 def _compute_provider_model_snapshots(
     *, provider: Any, model: Any, base_url: Any, no_agent: Any,
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -2843,7 +2866,7 @@ def _record_run_outcome(
     job["last_status"] = status or (
         "error" if not success else ("delivery_failed" if delivery_failed else "ok"))
     cancelled = status == "cancelled"  # an operator stop is not a failure
-    synthetic = status in _SYNTHETIC_FAILURE_STATUSES
+    synthetic = status in _SYNTHETIC_FAILURE_STATUSES or status == "decision_reopened"
     _prev_err = job.get("last_error")
     job["last_error"] = None if success or cancelled else error
     if success:
@@ -2985,6 +3008,15 @@ def mark_job_run(
         now = _hermes_now().isoformat()
         extra = extra_fire.is_extra(job)  # read before the outcome clears the claim
         held = extra_fire.held_markers(job) if extra else {}
+        ledger = job.get("decision_ledger")
+        if isinstance(ledger, dict) and ledger.get("state") == "reopened":
+            # #3474: no action ran. Preserve the pause and the repeat budget, including a
+            # finite one-shot whose only occurrence was claimed for this decision.
+            _record_run_outcome(job, False, error, delivery_error, "decision_reopened", now)
+            job.update(held)
+            job.update(enabled=False, state="paused", next_run_at=None)
+            save_jobs(jobs)
+            return True
         _record_run_outcome(job, success, error, delivery_error, status, now)
         job.update(held)  # a run-now queued mid-run is its own fire, not this one
         if execution_id is not None:  # retire ids recovery can no longer replay; latest stays last
