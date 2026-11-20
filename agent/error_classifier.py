@@ -355,6 +355,12 @@ _ROUTE_MODEL_REJECTION_PATTERNS = (
 _MODEL_NOT_FOUND_PATTERNS = (
     "is not a valid model", "invalid model", "model not found", "model_not_found", "does not exist",
     "no such model", "unknown model", "unsupported model", "no endpoints found that support tool use",
+    # A retired/disabled slug is dead for every credential: fall back instead of burning retries
+    # (#3097). "model is not supported" stays in _ROUTE_MODEL_REJECTION_PATTERNS because that
+    # phrasing also covers per-account entitlements, which are not a missing model.
+    "model is deprecated", "model has been deprecated", "model is decommissioned",
+    "model has been disabled", "model is disabled", "model is not accessible",
+    "not permitted to access this model", "access to model denied",
     "openrouter catalog",
     # Nous 404 when the provider retires a :free route — the slug is dead for every
     # credential, so fall back instead of burning retries (#123180). Unlike the free-tier
@@ -1586,12 +1592,15 @@ def _classify_image_tool_422(c: _Ctx) -> Verdict:
 # 401 not retryable on its own: rotation/refresh run before the retryability
 # check, then the client-error abort path (fallback first) is correct. 408 is
 # retry-safe (RFC 9110 §15.5.9; proxies emit it when generation outruns the
-# read window). Unlisted 4xx → format_error, 5xx → server_error.
+# read window). 504 Gateway Timeout routes to timeout so progressive backoff
+# (#1100) and the consecutive-timeout circuit breaker (#1142) engage; the
+# generic 5xx bucket is excluded from the timeout trigger predicate.
+# Unlisted 4xx → format_error, 5xx → server_error.
 _STATUS_HANDLERS: dict[int, Callable[[_Ctx], Verdict]] = {
     400: _classify_400, 401: lambda c: _V_AUTH_ROTATE,
     402: lambda c: _classify_402(c.msg, dict, c.code if _is_nous_route(c) else "", c.body),
     403: _status_403, 404: _status_404, 408: lambda c: _V_TIMEOUT, 413: lambda c: _V_PAYLOAD_TOO_LARGE,
-    422: lambda c: _classify_image_tool_422(c),
+    422: lambda c: _classify_image_tool_422(c), 504: lambda c: _V_TIMEOUT,
     429: _status_429, 500: _status_5xx, 502: _status_5xx,
     503: lambda c: _first_match(c.msg, _OVERFLOW_AS_5XX_RULES) or _V_OVERLOADED,
     529: lambda c: _first_match(c.msg, _OVERFLOW_AS_5XX_RULES) or _V_OVERLOADED,
