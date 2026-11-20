@@ -1357,11 +1357,17 @@ def _run_approval_guards(command: str, env_type: str, config: dict[str, Any], *,
                 _is_interactive_cli,
                 _is_gateway_approval_context,
             )
+            from tools import approval_context
             from utils import env_var_enabled
 
             is_cron = env_var_enabled("HERMES_CRON_SESSION")
             is_cli_ctx = _is_interactive_cli()
             is_gw_ctx = _is_gateway_approval_context()
+            # A classic CLI/TUI/Desktop/ACP session runs in the gateway under a frozen launch
+            # policy: its viewer can still answer /approve after the turn that parked this ends
+            # (a side task or a delegate child has no notifier of its own). Keep the parked
+            # result instead of calling it a headless subagent -- the session is still live.
+            local_session = approval_context.is_local_interactive_session()
             extra = dict(
                 command=approval.get("command", command),
                 description=approval.get("description", "command flagged"),
@@ -1369,7 +1375,7 @@ def _run_approval_guards(command: str, env_type: str, config: dict[str, Any], *,
                 smart_denied=approval.get("smart_denied", False),
                 allow_permanent=approval.get("allow_permanent", True),
             )
-            if is_cron or (not is_cli_ctx and not is_gw_ctx):
+            if is_cron or (not is_cli_ctx and not is_gw_ctx and not local_session):
                 desc = extra["description"]
                 raise _Rejected(_error_json(
                     (

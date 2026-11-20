@@ -523,7 +523,7 @@ def _harm_gated_invoke(agent, ref, next_args, messages):
 def _record_tool_circuit_breaker(agent, tool_name: str, result: Any, is_error: bool, effective_task_id: str) -> Any:
     # Retry-spiral circuit breaker check (#3391)
     try:
-        from tools.tool_circuit_breaker import TOOL_CIRCUIT_BREAKER
+        from tools.tool_circuit_breaker import TOOL_CIRCUIT_BREAKER, append_diagnostic
         _eff_sid = getattr(agent, "session_id", None) or effective_task_id or "default"
         _st = "error" if is_error else "success"
         _err_msg = _multimodal_text_summary(result) if is_error else None
@@ -534,17 +534,7 @@ def _record_tool_circuit_breaker(agent, tool_name: str, result: Any, is_error: b
             error_message=_err_msg,
         )
         if _breaker_event and _breaker_event.get("circuit_breaker_tripped"):
-            if isinstance(result, str) and "[CIRCUIT_BREAKER]" not in result:
-                fails = _breaker_event['consecutive_failures']
-                bgt = _breaker_event['budget']
-                fcls = _breaker_event['failure_class']
-                act = _breaker_event['suggested_action']
-                _diag = (
-                    f"\n\n[CIRCUIT_BREAKER] Tool '{tool_name}' has failed "
-                    f"{fails} consecutive times (budget: {bgt}). "
-                    f"Class: {fcls}. Suggested action: {act}"
-                )
-                return result + _diag
+            return append_diagnostic(result, _breaker_event, label="Suggested action")
     except Exception as _cb_err:
         logger.debug("Circuit breaker record_result failed: %s", _cb_err)
     return result

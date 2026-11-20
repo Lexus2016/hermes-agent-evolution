@@ -1115,7 +1115,7 @@ def handle_function_call(
 
         # Retry-spiral circuit breaker check (#3241)
         try:
-            from tools.tool_circuit_breaker import TOOL_CIRCUIT_BREAKER
+            from tools.tool_circuit_breaker import TOOL_CIRCUIT_BREAKER, append_diagnostic
             _st, _err_type, _err_msg = _tool_result_observer_fields(function_name, result)
             _eff_sid = ids.session_id or ids.task_id or "default"
             _breaker_event = TOOL_CIRCUIT_BREAKER.record_result(
@@ -1125,15 +1125,7 @@ def handle_function_call(
                 error_message=_err_msg,
             )
             if _breaker_event and _breaker_event.get("circuit_breaker_tripped"):
-                if isinstance(result, str) and "[CIRCUIT_BREAKER]" not in result:
-                    _diag = (
-                        f"\n\n[CIRCUIT_BREAKER] Tool '{function_name}' has failed "
-                        f"{_breaker_event['consecutive_failures']} consecutive times "
-                        f"(budget: {_breaker_event['budget']}). "
-                        f"Class: {_breaker_event['failure_class']}. "
-                        f"Recommendation: {_breaker_event['strategy_recommendation']}"
-                    )
-                    result += _diag
+                result = append_diagnostic(result, _breaker_event, label="Recommendation")
         except Exception:
             pass
 
