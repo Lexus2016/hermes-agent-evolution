@@ -24,7 +24,8 @@ from tools.tool_search_catalog import (
     CatalogEntry, _fn, _listing_group_label, _registry_entry, _registry_toolset,
     build_catalog, build_catalog_listing_with_form, search_catalog)
 from tools.tool_search_validation import (
-    local_batch_error, normalize_tool_call_entries, not_deferrable_error, validate_deferred_call_args)
+    local_batch_error, normalize_tool_call_entries, not_deferrable_error, session_unavailable_error,
+    unavailable_in_session_reason, validate_deferred_call_args)
 from tools.connectors import CONNECTOR_BATCH_SENTINEL, is_connector_name
 from tools.connectors.search import (
     connections_in_scope, connector_entries_by_group, connectors_unavailable, remote_schemas_for)
@@ -337,24 +338,23 @@ def _tool_def_names(tool_defs: Iterable[dict[str, Any]]) -> Iterable[str]:
     return (_fn(td).get("name", "") for td in tool_defs)
 
 
-def classify_tools(
-    tool_defs: list[dict[str, Any]],
-    defer_tools: Optional[Any] = None,
-    config: Optional[Any] = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def session_tool_names(tool_defs: Iterable[dict[str, Any]]) -> frozenset[str]:
+    """Every tool name in the session's ``tool_defs`` — what this session can actually
+    reach. Public wrapper over the private name extractor so callers outside this module
+    (the ``model_tools`` dispatcher) can scope error messages to the real session."""
+    return frozenset(n for n in _tool_def_names(tool_defs) if n)
+
+
+def classify_tools(tool_defs: list[dict[str, Any]], defer_tools: Optional[Any] = None,
+                   config: Optional[Any] = None,
+                   ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a tool-defs list into (visible, deferrable); bridge tools are dropped (re-added
     after classification)."""
     visible: list[dict[str, Any]] = []
     deferrable: list[dict[str, Any]] = []
-    for td in tool_defs:
-        fn = _fn(td)
-        name = fn.get("name", "")
-        if name in BRIDGE_TOOL_NAMES:
-            continue
-        if is_deferrable_tool_name(name, defer_tools=defer_tools, config=config):
-            deferrable.append(td)
-        else:
-            visible.append(td)
+    for td, name in zip(tool_defs, _tool_def_names(tool_defs)):
+        if name not in BRIDGE_TOOL_NAMES:
+            (deferrable if is_deferrable_tool_name(name, defer_tools, config=config) else visible).append(td)
     return visible, deferrable
 
 
@@ -419,8 +419,9 @@ def _bridge_schema(
 
 
 _CONNECTIONS_HINT = (
-    " `connectors__` names are tools of the user's app accounts (Gmail, Linear, ...); "
-    "`manage_connections` checks or authorizes an account.")
+    " Searches also cover the user's connected app accounts, whose tools are hosted and so "
+    "never listed here (results named `connectors__<app>__<tool>`); `manage_connections` checks "
+    "or connects an account.")
 
 
 def _search_description(deferred_count: int, listing: Optional[str], listing_form: str,
@@ -1062,26 +1063,25 @@ def _dispatch_tool_describe_batched(
     not_found: list[str] = []
     undescribed: list[str] = []
     errors: dict[str, str] = {}
+    session_names = session_tool_names(current_tool_defs)
     for name in names:
         fn = by_name.get(name)
         remote_fn = remote_schemas.get(name)
         if fn is not None:
-            tools[name] = {
-                "description": fn.get("description", ""),
-                "parameters": fn.get("parameters", {}),
-            }
+            tools[name] = {"description": fn.get("description", ""),
+                           "parameters": fn.get("parameters", {})}
         elif isinstance(remote_fn, dict):
-            tools[name] = {
-                "description": str(remote_fn.get("description", "")),
-                "parameters": remote_fn.get("parameters", {}),
-            }
+            tools[name] = {"description": str(remote_fn.get("description", "")),
+                           "parameters": remote_fn.get("parameters", {})}
         elif is_connector_name(name):
             (undescribed if hosted_failure else not_found).append(name)
+        elif unavailable := session_unavailable_error(name, session_names):
+            # A core tool absent here, deferred or not: tool_search cannot surface it.
+            errors[name] = unavailable
         elif _registry_entry(name) is not None and not is_deferrable_tool_name(
-            name, config=config
-        ):
+            name, load_config_readonly().effective_defer_tools):
             # Registered but bridge/core/GUI-surface: a real name, wrong door.
-            errors[name] = not_deferrable_error(name)
+            errors[name] = not_deferrable_error(name, session_names)
         else:
             not_found.append(name)
     result: dict[str, Any] = {"tools": tools}
@@ -1164,67 +1164,37 @@ def out_of_scope_reason(name: str) -> Optional[str]:
     return None
 
 
-# ── Non-deferrable tool_call alternatives & error (#1392 / #1786 / #1307) ────────
-# When an agent (especially in a subagent/cron context where terminal is
-# unavailable per #1307) tries to invoke a core tool via tool_call, the
-# generic "is not a deferrable tool" message gave no recovery guidance and
-# the agent retried the same pattern in a loop.
-_CORE_TOOL_ALTERNATIVES: dict[str, str] = {
-    "terminal": (
-        "terminal is not available in this environment. "
-        "Use search_files for finding files, read_file for reading file contents, "
-        "patch for editing files, write_file for creating files, or delegate_task "
-        "to spawn a subagent that has terminal access."
-    ),
-    "execute_code": (
-        "execute_code is not available in this environment. "
-        "Use delegate_task to spawn a subagent that has code execution access, "
-        "or use terminal if available."
-    ),
-    "browser_navigate": (
-        "browser_navigate is not available in this environment. "
-        "Use web_search for search queries, web_extract for fetching page content, "
-        "or delegate_task to spawn a subagent that has browser access."
-    ),
-}
+def scope_block_reason(name: str) -> str:
+    """Block message for a ``tool_call`` naming a tool outside the session's scope. A core tool
+    (deferred by ``defer:`` or not) names its real reason, since tool_search cannot surface it
+    here; anything else keeps the search hint."""
+    return (out_of_scope_reason(name)
+            or (unavailable_in_session_reason(name)
+                if name in _core_tool_names() and _registry_entry(name) is not None else None)
+            or f"'{name}' is not available in this session. Use tool_search to find tools you can call.")
 
 
-def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) -> str:
-    """Build an actionable error message for a non-deferrable tool_call attempt."""
-    lower = name.lower()
+def resolve_underlying_call(args: dict[str, Any], session_tool_names: Optional[Iterable[str]] = None,
+                            ) -> tuple[Optional[str], dict[str, Any], Optional[str]]:
+    """Parse a ``tool_call`` invocation into (underlying_name, args, error_msg).
 
-    if lower in _CORE_TOOL_ALTERNATIVES:
-        effective = effective_core_tool_names(config)
-        if name in effective:
-            return (
-                f"'{name}' is a core tool, not a deferrable tool. "
-                "Call it directly — it is already in your tools list. "
-                "Do not use tool_call for core tools."
-            )
-        return (
-            f"'{name}' is not a deferrable tool and is not available in this "
-            f"environment. {_CORE_TOOL_ALTERNATIVES[lower]}"
-        )
+    Used by:
+    * the dispatcher in ``model_tools.handle_function_call``,
+    * the display layer (so the activity feed shows the underlying tool),
+    * the trajectory recorder.
 
-    effective = effective_core_tool_names(config)
-    if name in effective:
-        return (
-            f"'{name}' is a core tool, not a deferrable tool. "
-            f"Call '{name}' directly — it is already in your tools list. "
-            "Do not use tool_call for core tools."
-        )
-    return (
-        f"'{name}' is not a deferrable tool. If '{name}' appears in the "
-        "model-facing tools list already, call it directly instead of via "
-        "tool_call. If it is not in your tools list, check the spelling or "
-        "use tool_search to find available deferred tools."
-    )
+    A connector-only batch resolves
+    to ``(CONNECTOR_BATCH_SENTINEL, {"calls": [...]}, None)``: the batch is
+    one dispatch unit owned by the ``model_tools`` bridge branch, and the
+    sentinel is what planners/display layers see. A single local entry keeps
+    the historical single-tool contract unchanged.
 
+    ``session_tool_names`` is the session's own tool list, when the caller has it. Passed
+    through so a core tool this session cannot reach reports *unavailable* rather than
+    "call it directly" — the static core list cannot tell the two apart.
 
-def resolve_underlying_call(
-    args: Dict[str, Any], config: Optional[ToolSearchConfig] = None
-) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
-    """Parse a ``tool_call`` invocation into (underlying_name, args, error_msg)."""
+    On parse error, returns ``(None, {}, error_message)``.
+    """
     entries, err = normalize_tool_call_entries(args)
     if err:
         return None, {}, err
@@ -1236,149 +1206,42 @@ def resolve_underlying_call(
 
     name = entries[0]["name"]
     raw_args = entries[0]["arguments"]
-    defer_cfg = config if config is not None else load_config_readonly()
-    if not is_deferrable_tool_name(name, config=defer_cfg):
-        # Unknown names must not be told to "call it directly" — that is the
-        # opposite correction for a bare MCP suffix. Known core tools keep the
-        # enriched recovery when this session stripped them from the tool list.
-        from tools.tool_search_validation import not_deferrable_error
-        enriched = _non_deferrable_error(name, config)
-        if "not available" in enriched:
-            return None, {}, enriched
-        return None, {}, not_deferrable_error(name)
+    unavailable = session_unavailable_error(name, session_tool_names)
+    if unavailable:
+        return None, {}, unavailable
+    if not is_deferrable_tool_name(name, load_config_readonly().effective_defer_tools):
+        return None, {}, not_deferrable_error(name, session_tool_names)
     return name, raw_args, None
 
 
-# ── Native tool argument validation contract ─────────────────────────────
-_SCHEMA_PY_TYPES = {
-    "string": (str,),
-    "number": (int, float),
-    "integer": (int,),
-    "boolean": (bool,),
-    "array": (list,),
-    "object": (dict,),
-}
-
-
-def _check_type(value: Any, type_str: str) -> bool:
-    """Check whether *value* matches the JSON Schema *type_str*."""
-    if type_str == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    py_types = _SCHEMA_PY_TYPES.get(type_str)
-    if py_types is None:
-        return True
-    return isinstance(value, py_types)
-
-
-def validate_tool_args(
-    name: str,
-    args: Dict[str, Any],
-    schema: Optional[dict] = None,
-) -> Tuple[bool, Optional[str]]:
-    """Validate *args* against a tool's OpenAI-format parameter *schema*."""
-    if not schema:
-        return True, None
-    params = schema.get("parameters") or {}
-    properties = params.get("properties") or {}
-    required = params.get("required") or []
-
-    if not isinstance(args, dict):
-        return False, f"Arguments for '{name}' must be an object"
-
-    for req in required:
-        if req not in args:
-            return False, f"Missing required parameter '{req}' for tool '{name}'"
-        if args[req] is None:
-            prop = properties.get(req) or {}
-            prop_type = prop.get("type")
-            is_nullable = (
-                prop.get("nullable") is True
-                or prop_type == "null"
-                or (isinstance(prop_type, list) and "null" in prop_type)
-            )
-            if not is_nullable:
-                return False, f"Missing required parameter '{req}' for tool '{name}'"
-
-    for key, value in args.items():
-        if value is None:
-            continue
-        prop = properties.get(key)
-        if not prop:
-            continue
-        expected_types = prop.get("type")
-        if not expected_types:
-            continue
-        if isinstance(expected_types, str):
-            expected_types = [expected_types]
-        if not any(_check_type(value, t) for t in expected_types):
-            got = type(value).__name__
-            want = " or ".join(expected_types)
-            return False, (
-                f"Parameter '{key}' for tool '{name}' has wrong type: "
-                f"expected {want}, got {got}"
-            )
-    return True, None
-
-
 __all__ = [
-    "TOOL_SEARCH_NAME",
-    "TOOL_DESCRIBE_NAME",
-    "TOOL_CALL_NAME",
     "BRIDGE_TOOL_NAMES",
-    "ToolSearchConfig",
-    "CatalogEntry",
+    "CONNECTOR_BATCH_SENTINEL",
+    "TOOL_CALL_NAME",
+    "TOOL_DESCRIBE_NAME",
+    "TOOL_SEARCH_NAME",
     "AssemblyResult",
-    "load_config",
-    "load_config_readonly",
-    "is_deferrable_tool_name",
-    "classify_tools",
-    "estimate_tokens_from_schemas",
-    "should_activate",
-    "build_catalog",
-    "build_catalog_listing",
-    "build_catalog_listing_with_form",
-    "listing_token_budget",
-    "search_catalog",
-    "bridge_tool_schemas",
+    "CatalogEntry",
+    "ToolSearchConfig",
     "assemble_tool_defs",
-    "is_bridge_tool",
-    "dispatch_tool_search",
+    "bridge_tool_schemas",
+    "build_catalog",
+    "build_catalog_listing_with_form",
+    "classify_tools",
     "dispatch_tool_describe",
+    "dispatch_tool_search",
+    "estimate_tokens_from_schemas",
+    "is_bridge_tool",
+    "is_connector_name",
+    "is_deferrable_tool_name",
+    "listing_token_budget",
+    "load_config",
+    "normalize_tool_call_entries",
     "out_of_scope_reason",
     "resolve_underlying_call",
+    "scope_block_reason",
     "scoped_deferrable_names",
+    "search_catalog",
+    "should_activate",
     "validate_deferred_call_args",
-    "normalize_tool_call_entries",
-    "CONNECTOR_BATCH_SENTINEL",
-    "is_connector_name",
-    "effective_core_tool_names",
-    "get_previous_queries",
-    "note_tool_search",
-    "reset_search_streak",
-    "_non_deferrable_error",
-    "_CORE_TOOL_ALTERNATIVES",
-    "clear_describe_cache",
-    "clear_search_catalog_cache",
-    "validate_tool_args",
 ]
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-from typing import Literal  # noqa: F401,E402
-import copy  # noqa: F401,E402
-from dataclasses import field  # noqa: F401,E402
-import re  # noqa: F401,E402
-import snowballstemmer  # noqa: F401,E402
-import threading  # noqa: F401,E402
-
-
-def build_catalog_listing(
-    deferrable: list[dict[str, Any]],
-    *,
-    max_tokens: int = 4000,
-) -> tuple[Optional[str], str]:
-    return build_catalog_listing_with_form(deferrable, max_tokens=max_tokens)
-# ---- END PLUGIN-COMPAT ----

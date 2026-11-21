@@ -405,6 +405,18 @@ def memory_tool(
     finally:
         FAILURE_CLASS.reset(token)
 
+    # Classified failures carry their class back to callers (the inline executor's
+    # circuit breaker reads it): a refused call is an answer from a working store,
+    # not a broken backend, and must not open the "proceed without persistence" gate.
+    if outcome != "success":
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, dict) and parsed.get("success") is False:
+                parsed.setdefault("failure_class", failure_class)
+                result = json.dumps(parsed, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+
     try:
         from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
         record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
@@ -412,31 +424,6 @@ def memory_tool(
         pass
 
     return result
-
-
-def _handle_operations_batch(
-    store: MemoryStore,
-    target: str,
-    operations: Any,
-    source_class: str,
-    trust_tier: str,
-    memory_char_limit: Optional[int],
-) -> tuple[str, str]:
-    if not isinstance(operations, list):
-        return _invalid("operations must be a list of {action, content?, old_text?} objects.")
-    if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
-        return _invalid(_REPLACE_REMOVED)
-    gate_result = _apply_write_gate(
-        store, "batch", target, None, None, operations,
-        source_class=source_class, trust_tier=trust_tier,
-    )
-    if gate_result is not None:
-        return "rejected", gate_result
-    try:
-        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
-    except Exception as exc:  # health: allow BLE001 -- deliberate boundary returning formatted memory error
-        return "failed", _memory_enriched_error(exc, "batch")
-    return _applied(result)
 
 
 def _memory_tool(
@@ -460,9 +447,6 @@ def _memory_tool(
     # Accept new_text as alias for content
     if not content and new_text:
         content = new_text
-
-    if target is None:
-        target = "memory"
 
     target_error = _memory_target_error(store, target, operations)
     if target_error is not None:
@@ -613,7 +597,7 @@ def apply_memory_pending(payload: dict[str, Any], store: MemoryStore) -> dict[st
     staged before pinning has no verifiable target, so it is refused rather than replayed by
     old_text (which could hit a newer entry the approver never saw). Provenance tags from the
     staged payload are preserved (#316)."""
-    action, target = payload.get("action"), payload.get("target", "memory")
+    action, target = payload.get("action"), payload.get("target")
     target_error = _memory_target_error(store, target, payload.get("operations"))
     if target_error is not None:
         return target_error
@@ -649,121 +633,60 @@ MEMORY_SCHEMA = {
         "checked only on the FINAL result — so a single call can remove/patch stale entries "
         "to free room AND add new ones, even when an add alone would overflow. The response "
         "reports current/limit chars and confirms completion; one batch call finishes the "
-        "update, so don't repeat it. Use the bare action/content/old_text fields only for a "
-        "single lone change. Use action='search' to read entries back (optionally filtered "
-        "by provenance via source_filter / min_trust).\n\n"
-        "WHEN: save proactively when the user states a preference, correction, or personal "
-        "detail, or you learn a stable fact about their environment, conventions, or workflow. "
-        "Priority: user preferences & corrections > environment facts > procedures. The best "
-        "memory stops the user repeating themselves.\n\n"
-        "IF FULL: an add is auto-accepted by evicting the OLDEST entry to make room "
-        "(the evicted text is listed under `evicted` in the response, so nothing is lost silently). "
-        "Only if the new entry alone exceeds the whole budget, or the safety floor is reached, is the add rejected with the current entries shown — then reissue as ONE batch that removes or shortens enough stale entries and adds the new one together. Or call action='compact' first to shorten entries so the batch fits.\n\n"
+        "update, so don't repeat it.\n\n"
+        "WHEN: only for facts that apply to EVERY session regardless of task: who the user "
+        "is, stable environment facts, standing conventions with no task home. Anything "
+        "learned while doing a task (procedures, pitfalls, and the user's preferences and "
+        "corrections for that kind of work) belongs in the task's skill via skill_manage, "
+        "where it loads only when relevant; memory is injected into every turn and must "
+        "stay small.\n\n"
+        "IF FULL: an add is rejected with the current entries shown. Reissue as ONE batch that "
+        "removes or shortens enough stale entries and adds the new one together.\n\n"
         "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
         "notes (environment, conventions, tool quirks, lessons).\n\n"
-        "PROVENANCE (optional, on add/replace): tag where a fact came from. source_class = "
-        "user_input (the user told you), external_tool (a tool/API returned it), agent_authored "
-        "(YOUR own inference — treat as a guess), or system. trust_tier rates reliability. "
-        "Tagging agent_authored guesses keeps them distinguishable from facts the user "
-        "actually stated.\n\n"
         "SKIP: trivial/obvious info, easily re-discovered facts, raw data dumps, task progress, "
         "completed-work logs, temporary TODO state (use session_search for those). Reusable "
         "procedures belong in a skill, not memory."
     ),
+    # Each field is advertised once, inside operations[]. The handler still ACCEPTS the
+    # top-level single-op shape (action/content/old_text) and the new_text alias: models
+    # drift and older transcripts replay them.
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["add", "patch", "replace", "remove", "search", "compact", "supersede"],
-                "description": "The action to perform (single op: 'add', 'patch', 'replace', 'remove', 'search' to read entries, 'compact' to shorten entries to fit, or 'supersede' to retire a stale entry). Omit when using the 'operations' batch array.",
-            },
             "target": {
                 "type": "string",
                 "enum": ["memory", "user"],
-                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile.",
-            },
-            "content": {
-                "type": "string",
-                "description": "Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', the text that replaces old_text; the rest of the entry is kept. Alias: 'new_text'."
-            },
-            "old_text": {
-                "type": "string",
-                "description": "REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces exactly this span (it must occur once in the entry); 'remove' deletes the whole entry. Omit for 'add'."
-            },
-            "new_text": {
-                "type": "string",
-                "description": "Alias for 'content'. If both are set, 'content' wins."
+                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile."
             },
             "operations": {
                 "type": "array",
                 "description": (
-                    "Batch shape: a list of operations applied atomically in one call "
-                    "against the final char budget. Preferred when making multiple changes "
-                    "or consolidating to make room. Each item is {action, content?, old_text?}."
+                    "Changes applied atomically in one call against the final char budget; "
+                    "a single change is a one-item list."
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "enum": ["add", "patch", "remove"]},
-                        "content": {"type": "string", "description": "Required for add and patch, as 'content' above."},
-                        "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
-                        "old_text": {"type": "string", "description": "As 'old_text' above."},
+                        "content": {
+                            "type": "string",
+                            "description": ("Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', "
+                                            "the text that replaces old_text; the rest of the entry is kept."),
+                        },
+                        "old_text": {
+                            "type": "string",
+                            "description": ("REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces "
+                                            "exactly this span (it must occur once in the entry); 'remove' deletes the "
+                                            "whole entry. Omit for 'add'."),
+                        },
                     },
                     "required": ["action"],
                     "additionalProperties": False,
                 },
             },
-            "target_size": {
-                "type": "integer",
-                "description": "Optional for 'compact': target character count (defaults to the store limit).",
-            },
-            "prefer": {
-                "type": "string",
-                "enum": ["longest", "oldest"],
-                "description": "Optional for 'compact': which entries to trim first (default: longest).",
-            },
-            "source_class": {
-                "type": "string",
-                "enum": list(SOURCE_CLASSES),
-                "description": (
-                    "Optional provenance for 'add'/'replace': who produced this fact. "
-                    "Defaults to 'unknown'. Use 'agent_authored' for your own guesses."
-                ),
-            },
-            "trust_tier": {
-                "type": "string",
-                "enum": list(TRUST_TIERS),
-                "description": (
-                    "Optional provenance for 'add'/'replace': how reliable this fact is. "
-                    "Defaults to 'unknown'."
-                ),
-            },
-            "source_filter": {
-                "type": "array",
-                "items": {"type": "string", "enum": list(SOURCE_CLASSES)},
-                "description": "Optional for 'search': keep only entries with these source classes.",
-            },
-            "min_trust": {
-                "type": "string",
-                "enum": list(TRUST_TIERS),
-                "description": "Optional for 'search': keep only entries at or above this trust tier.",
-            },
-            "include_superseded": {
-                "type": "boolean",
-                "description": "Optional for 'search': also return superseded (retired) entries, each with a superseded_at timestamp. Default false.",
-            },
-            "memory_char_limit": {
-                "type": "integer",
-                "description": (
-                    "Optional per-batch override for the 'memory' target char limit, "
-                    "only honoured when config 'memory.allow_batch_memory_char_limit_override' "
-                    "is True. Ignored for 'user' target. The system-prompt snapshot always "
-                    "uses the configured limit (issue #517)."
-                ),
-            },
         },
-        "required": ["target"],
+        "required": ["target", "operations"],
     },
 }
 
@@ -802,7 +725,7 @@ registry.register(
     schema=MEMORY_SCHEMA,
     handler=lambda args, **kw: memory_tool(
         action=args.get("action", ""),
-        target=args.get("target", "memory"),
+        target=args.get("target"),
         content=args.get("content"),
         old_text=args.get("old_text"),
         new_text=args.get("new_text"),
@@ -837,3 +760,28 @@ def __getattr__(name):  # PEP 562 — lazy so no import cycles
     import importlib
     return getattr(importlib.import_module(target[0]), target[1])
 # ---- END PLUGIN-COMPAT ----
+
+
+def _handle_operations_batch(
+    store: MemoryStore,
+    target: str,
+    operations: Any,
+    source_class: str,
+    trust_tier: str,
+    memory_char_limit: Optional[int],
+) -> tuple[str, str]:
+    if not isinstance(operations, list):
+        return _invalid("operations must be a list of {action, content?, old_text?} objects.")
+    if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
+        return _invalid(_REPLACE_REMOVED)
+    gate_result = _apply_write_gate(
+        store, "batch", target, None, None, operations,
+        source_class=source_class, trust_tier=trust_tier,
+    )
+    if gate_result is not None:
+        return "rejected", gate_result
+    try:
+        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
+    except Exception as exc:  # health: allow BLE001 -- deliberate boundary returning formatted memory error
+        return "failed", _memory_enriched_error(exc, "batch")
+    return _applied(result)

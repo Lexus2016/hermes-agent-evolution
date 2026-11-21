@@ -5,7 +5,7 @@
 // plain `check` gives that. This is the same selection rule the old CI matrix
 // used, so the set of commands is unchanged. Only the schedule is different.
 //
-// This is not `npm run --ws check`, because that command is serial and stops
+// This is not `pnpm -r run check`, because that command stops
 // at the first workspace that fails. This runs every unit and fails at the
 // end with the full list.
 //
@@ -17,23 +17,30 @@
 // `--concurrency N` sets the limit. `--list` prints the units and exits.
 
 import { execFileSync, spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { availableParallelism } from 'node:os'
+import { join, relative } from 'node:path'
 
 const IS_CI = Boolean(process.env.GITHUB_ACTIONS)
-const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const PNPM = 'pnpm'
 
 /** @returns {{pkg: string, script: string}[]} */
 function discoverUnits() {
-  const raw = execFileSync(NPM, ['query', '.workspace'], {
+  const raw = execFileSync(PNPM, ['ls', '--recursive', '--depth', '-1', '--json'], {
     encoding: 'utf-8',
     shell: process.platform === 'win32',
   })
-  /** @type {{location: string, scripts?: Record<string,string>}[]} */
-  const pkgs = JSON.parse(raw)
+  /** @type {{path: string}[]} */
+  const projects = JSON.parse(raw)
+  const root = process.cwd()
 
   /** @type {{pkg: string, script: string}[]} */
   const units = []
-  for (const pkg of pkgs) {
+  for (const project of projects) {
+    const location = relative(root, project.path).split('\\').join('/')
+    // The root's `check` runs every workspace's check: it is not a unit.
+    if (!location) continue
+    const pkg = { location, ...JSON.parse(readFileSync(join(project.path, 'package.json'), 'utf-8')) }
     const scripts = pkg.scripts || {}
     const subs = Object.keys(scripts).filter((s) => /^check:.+$/.test(s))
     if (subs.length > 0) {
@@ -49,7 +56,7 @@ function discoverUnits() {
 function runUnit(unit) {
   return new Promise((resolve) => {
     const started = Date.now()
-    const child = spawn(NPM, ['run', '--prefix', unit.pkg, unit.script], {
+    const child = spawn(PNPM, ['--dir', unit.pkg, 'run', unit.script], {
       // Buffer, and do not inherit. Children that share one stdout
       // interleave their lines, and a failure is then hard to read.
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -88,6 +95,36 @@ async function main() {
   if (argv.includes('--list')) {
     for (const u of units) console.log(`${u.pkg} :: ${u.script}`)
     return
+  }
+
+  // Sharding: a GitHub-hosted 4-core runner runs the whole payload in one job
+  // and outgrew the job timeout. ``--shard k/n`` takes every n-th unit starting
+  // at k, so a matrix of n legs covers the payload once with no overlap. The
+  // selection is by discovery order, so a new package or check script still
+  // lands in exactly one leg without touching the workflow.
+  const shardIdx = argv.indexOf('--shard')
+  if (shardIdx !== -1) {
+    const spec = String(argv[shardIdx + 1] || '')
+    const m = spec.match(/^(\d+)\/(\d+)$/)
+    if (!m) {
+      console.error(`::error::--shard expects k/n, got '${spec}'`)
+      process.exit(1)
+    }
+    const k = Number(m[1])
+    const n = Number(m[2])
+    if (n < 1 || k < 0 || k >= n) {
+      console.error(`::error::--shard k/n out of range: ${spec}`)
+      process.exit(1)
+    }
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      if (i % n !== k) units.splice(i, 1)
+    }
+    console.log(`shard ${k}/${n}: ${units.length} checks`)
+    if (units.length === 0) {
+      // An empty leg would report green having run nothing.
+      console.error(`::error::shard ${k}/${n} selected no checks`)
+      process.exit(1)
+    }
   }
 
   const flagIdx = argv.indexOf('--concurrency')

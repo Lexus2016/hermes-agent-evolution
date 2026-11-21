@@ -5,9 +5,29 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import contextlib
+
 import pytest
 
 from cron import evolution_preflight as ep
+
+@contextlib.contextmanager
+def _owned_fire(job):
+    """Run ``_run_job_impl`` as the admitted owner of its fire.
+
+    v0.23.1 hands an unowned agent fire to the gateway (which a unit test has no
+    way to serve), so the tests own the fire themselves and stub the session
+    store, exercising the body in this process.
+    """
+    from gateway import session_cron
+
+    token = session_cron._execution.set((MagicMock(), "preflight-test", job["id"], None))
+    try:
+        with patch("cron.scheduler._open_cron_session_db", return_value=MagicMock()):
+            yield
+    finally:
+        session_cron._execution.reset(token)
+
 
 
 class TestEvolutionJobStage:
@@ -469,7 +489,8 @@ class TestSchedulerIntegration:
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
-            success, _output, final_response, error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, _output, final_response, error = _run_job_impl(job)
 
         assert success is True
         assert error is None
@@ -514,7 +535,8 @@ class TestSchedulerIntegration:
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
-            success, _output, final_response, _error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, _output, final_response, _error = _run_job_impl(job)
 
         assert success is True
         assert final_response == "ok"
@@ -564,7 +586,8 @@ class TestSchedulerHaltGate:
             patch("cron.evolution_preflight.preflight_provider") as mock_preflight,
             patch("run_agent.AIAgent") as mock_agent_cls,
         ):
-            success, output, final_response, error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, output, final_response, error = _run_job_impl(job)
 
         assert success is True
         assert final_response == "[SILENT]"
@@ -596,7 +619,8 @@ class TestSchedulerHaltGate:
                 ),
                 patch("run_agent.AIAgent") as mock_agent_cls,
             ):
-                success, _output, final_response, _error = _run_job_impl(job)
+                with _owned_fire(job):
+                    success, _output, final_response, _error = _run_job_impl(job)
             assert success is True
             assert final_response == "[SILENT]"
             mock_agent_cls.assert_not_called()
@@ -635,7 +659,8 @@ class TestSchedulerHaltGate:
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
-            success, _output, final_response, _error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, _output, final_response, _error = _run_job_impl(job)
 
         assert success is True
         assert final_response == "ok"
@@ -676,7 +701,8 @@ class TestSchedulerHaltGate:
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
             # ...classification blowing up must not raise out of _run_job_impl.
-            success, _output, final_response, error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, _output, final_response, error = _run_job_impl(job)
 
         assert success is True
         assert error is None
@@ -713,7 +739,8 @@ class TestSchedulerHaltGate:
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
-            success, _output, final_response, _error = _run_job_impl(job)
+            with _owned_fire(job):
+                success, _output, final_response, _error = _run_job_impl(job)
 
         assert success is True
         assert final_response == "ok"

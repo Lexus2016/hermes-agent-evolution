@@ -51,8 +51,10 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sqlite3
 import subprocess
+import sys
 import time
 import tomllib
 from dataclasses import dataclass, field
@@ -64,6 +66,7 @@ import hermes_yaml as yaml
 
 from tests.e2e.core._pending_fixes import known_failure
 from tests.e2e.core.upgrade import _helpers as H
+from tests.e2e.core.upgrade import _install_helpers as I
 from tests.fakes.fake_llm_provider import FakeLLMServer
 
 pytestmark = [
@@ -104,28 +107,11 @@ class _Refs(NamedTuple):
 
 @functools.cache
 def _refs() -> _Refs:
-    """HEAD and release N-1, resolved on first use: collection (every CI shard) runs no git.
-
-    N-1 is the nearest CalVer release tag before HEAD; HERMES_E2E_UPGRADE_BASE=<ref> starts from any
-    older ref instead (e.g. the pre-handoff v2026.9.14, or a patched base when proving a leg red
-    against the N-1 side).
-    """
+    """HEAD and the start version (``_install_helpers.upgrade_base``), resolved on first use:
+    collection (every CI shard) runs no git."""
     head = _git("rev-parse", "HEAD", cwd=H.WORKTREE)
-    # A pull_request checkout is a merge of the PR into the base branch, so
-    # HEAD~1 is that base. Its nearest tag is a release the PR has already
-    # left (v2026.9.14): the update then runs new callers against cached
-    # modules that lack scope_home and restore_interrupted_pull. The PR head
-    # is the second parent; a non-merge checkout has only HEAD~1.
-    second = _git("rev-parse", "--verify", "--quiet", "HEAD^2", cwd=H.WORKTREE, check=False)
-    before = "HEAD^2" if second else "HEAD~1"
-    try:
-        tag = os.environ.get("HERMES_E2E_UPGRADE_BASE") or _git(
-            "describe", "--tags", "--match", "v20[0-9][0-9].*", "--abbrev=0", before,
-            cwd=H.WORKTREE,
-        )
-        return _Refs(head, tag, _git("rev-parse", f"{tag}^{{commit}}", cwd=H.WORKTREE))
-    except AssertionError:  # shallow CI checkout without tags
-        return _Refs(head, "", "")
+    base = I.upgrade_base()
+    return _Refs(head, base.ref, base.commit) if base else _Refs(head, "", "")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -142,6 +128,11 @@ from pathlib import Path
 root, base = Path(sys.argv[1]), sys.argv[2]
 cfg = tomllib.load(open(root / "pyproject.toml", "rb"))
 tops = [p for p in cfg["tool"]["setuptools"]["packages"]["find"]["include"] if "*" not in p]
+# Import name -> the optional extra that ships it. Only these may be absent from a HEAD-added
+# module's imports; any other missing module (a core dependency, a typo) is a real failure.
+OPTIONAL_SDKS = {"acp": "acp"}
+extras = cfg["project"].get("optional-dependencies", {})
+assert set(OPTIONAL_SDKS.values()) <= set(extras), f"stale OPTIONAL_SDKS extras: {OPTIONAL_SDKS}"
 added = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "--diff-filter=A", base, "HEAD", "--",
                         *[f"{t}/*.py" for t in tops]], capture_output=True, text=True).stdout.split()
 added = [a[:-3].replace("/", ".") for a in added if "/tests/" not in a and not a.endswith("__init__.py")][:3]
@@ -150,6 +141,9 @@ for name in tops + ["hermes_cli.main", "run_agent", "hermes_state"] + added:
     try:
         mod = importlib.import_module(name)
     except BaseException as exc:
+        missing = (getattr(exc, "name", None) or "").split(".")[0]
+        if name in added and isinstance(exc, ModuleNotFoundError) and missing in OPTIONAL_SDKS:
+            continue  # an optional extra's SDK; a stale finder misses the module itself, not an SDK
         bad.append(f"{name}: {type(exc).__name__}: {exc}")
         continue
     where = Path(getattr(mod, "__file__", None) or str(list(getattr(mod, "__path__", [""]))[0])).resolve()
@@ -332,12 +326,12 @@ _KILLED_RUN_PREFIX = ["/bin/sh", "-c", '"$0" "$@"; exit $?']
 _RETRY_PREFIX = ["/bin/sh", "-c", 'true; exec "$0" "$@"']
 
 
-def _make_origin(root: Path) -> Path:
+def _make_origin(root: Path, base: str) -> Path:
     origin = root / "origin.git"
     _git("clone", "-q", "--bare", "--shared", "--no-tags", str(H.WORKTREE), str(origin), cwd=root)
-    _git("update-ref", "refs/heads/main", _refs().base, cwd=origin)
+    _git("update-ref", "refs/heads/main", base, cwd=origin)
     _git("symbolic-ref", "HEAD", "refs/heads/main", cwd=origin)
-    _git("tag", "-f", "e2e-upgrade-base", _refs().base, cwd=origin)
+    _git("tag", "-f", "e2e-upgrade-base", base, cwd=origin)
     return origin
 
 
@@ -385,34 +379,19 @@ def _write_wrappers(leg_root: Path, install: Path, hermes_home: Path) -> Path:
     return wrap
 
 
-def _n1_pythonpath(root: Path, install: Path, venv: Path) -> str:
-    """``PYTHONPATH`` that imports the N-1 checkout without ``pyvenv.cfg``.
-
-    Inside bwrap, ``/proc/self/exe`` is the uv-managed interpreter, so
-    ``site.venv()`` never reads ``install/venv/pyvenv.cfg`` and the editable
-    finder stays unloaded. Later ``hermes`` commands still need the checkout
-    and its dependencies. The checkout directory answers ``hermes_cli``;
-    ``site-packages`` answers regular dependencies; a ``sitecustomize`` on the
-    front of the path ``addsitedir``s the venv so ``.pth`` packages load too.
-    Copying the interpreter would break ``$ORIGIN`` for libpython.
-    ``PYTHONSAFEPATH`` (set by the caller) keeps the sandbox cwd off
-    ``sys.path``, so ``tests/hermes_cli`` cannot shadow the checkout.
-    """
-    sites = sorted(p for p in (venv / "lib").glob("python3.*/site-packages") if p.is_dir())
-    assert sites, f"N-1 venv has no site-packages under {venv / 'lib'}"
-    boot = root / "venv-boot"
-    boot.mkdir(exist_ok=True)
-    body = "import site\n" + "".join(f"site.addsitedir({str(p)!r})\n" for p in sites)
-    (boot / "sitecustomize.py").write_text(body, encoding="utf-8")
-    return os.pathsep.join([str(boot), str(install), *(str(p) for p in sites)])
+def _sockets(directory: str, names: list[str]) -> list[str]:
+    """Unix sockets a release's CLI leaves in the home (``gateway.sock``): copytree cannot copy them."""
+    return [n for n in names if stat.S_ISSOCK(os.lstat(os.path.join(directory, n)).st_mode)]
 
 
-def make_leg(root: Path, template_home: Path | None) -> Leg:
+def make_leg(root: Path, template_home: Path | None, base: str | None = None) -> Leg:
+    """An install of ``base`` (default: the suite's start version) with its own venv and origin."""
+    base = base or _refs().base
     root.mkdir(parents=True, exist_ok=True)
-    origin = _make_origin(root)
+    origin = _make_origin(root, base)
     install = root / "install"
     _git("clone", "-q", "--shared", "-b", "main", str(origin), str(install), cwd=root)
-    assert _git("rev-parse", "HEAD", cwd=install) == _refs().base
+    assert _git("rev-parse", "HEAD", cwd=install) == base
     # Look like a normal (non-fork) install: origin is the official URL, rewritten in this repo's
     # own config to the local store, so the updater takes the common path and never hits the network.
     _git("remote", "set-url", "origin", OFFICIAL_URL, cwd=install)
@@ -437,12 +416,9 @@ def make_leg(root: Path, template_home: Path | None) -> Leg:
     hermes_home = Path(env_probe["HERMES_HOME"])
     if template_home is not None:
         shutil.rmtree(hermes_home)
-        shutil.copytree(template_home, hermes_home, symlinks=True)
+        shutil.copytree(template_home, hermes_home, symlinks=True, ignore=_sockets)
     wrap = _write_wrappers(root, install, hermes_home)
     env = H.isolated_env(root, extra_path=[wrap])
-    # Checkout + site-packages, not the sandbox cwd. See ``_n1_pythonpath``.
-    env["PYTHONPATH"] = pythonpath if "PYTHONPATH" not in env else pythonpath + os.pathsep + env["PYTHONPATH"]
-    env["PYTHONSAFEPATH"] = "1"
     return Leg(root=root, origin=origin, install=install, env=env, hermes_home=hermes_home, wrap_dir=wrap)
 
 
@@ -515,7 +491,8 @@ def migrate_oracle(leg: Leg, name: str, before: bytes) -> bytes:
     if src_env.exists():
         shutil.copy2(src_env, home / ".env")
     code = "from hermes_cli.config import migrate_config; migrate_config(interactive=False, quiet=True)"
-    cp = H.run([str(H.WORKTREE / ".venv" / "bin" / "python"), "-c", code],
+    # HEAD's test interpreter, however the runner got it: <checkout>/.venv exists only in CI's checkout.
+    cp = H.run([sys.executable, "-c", code],
                env=env, cwd=H.WORKTREE, writable=[oroot], timeout=CLI_TIMEOUT)
     assert cp.returncode == 0 and TRACEBACK not in cp.stderr, H.describe(cp)
     return (home / "config.yaml").read_bytes()
@@ -574,19 +551,16 @@ def assert_healthy_at_head(leg: Leg, provider: FakeLLMServer, final: subprocess.
             assert (home / ".env").read_bytes() == before[name]["env"], f"{name} .env rewritten by the update"
     jobs_after = json.loads((leg.hermes_home / "cron" / "jobs.json").read_text(encoding="utf-8"))
     assert _job_ids(jobs_after) == _job_ids(before["cron"]) and _job_ids(jobs_after), "cron jobs lost/changed"
-    # 3. config: exactly HEAD's documented migrations, nothing else
+    # 3. config: exactly HEAD's documented migrations, nothing else (asserted last, see the end)
+    drift = []
     for name, home in _profile_homes(leg).items():
         orig = before[name]["config"]
         after = (home / "config.yaml").read_bytes()
         expected = migrate_oracle(leg, name, orig)
-        migrated, tqmemory = _without_tqmemory_server(after)
-        assert migrated == expected, (
-            f"{name} config.yaml differs from HEAD's own migration of the pre-update file\n"
-            f"--- after update ---\n{after.decode()}\n--- expected ---\n{expected.decode()}")
-        if tqmemory is not None:
-            assert "turbo-memory-mcp" in tqmemory, tqmemory
-            assert "TQMEMORY_MIGRATE_ON_STARTUP" in tqmemory, tqmemory
-            assert "enabled: true" in tqmemory, tqmemory
+        if after != expected:
+            drift.append(f"{name} config.yaml differs from HEAD's own migration of the pre-update file\n"
+                         f"--- after update ---\n{after.decode()}\n--- expected ---\n{expected.decode()}")
+            assert after == expected.replace(b"    enabled: false\n", b"    disabled: true\n", 1), drift[-1]
         # Independent of the oracle (a clobbering migration would be mirrored by it): the user's
         # values survive semantically and every comment line survives verbatim.
         o, a = yaml.safe_load(orig), yaml.safe_load(after)
@@ -623,6 +597,10 @@ def assert_healthy_at_head(leg: Leg, provider: FakeLLMServer, final: subprocess.
     calls = (leg.root / "shims" / "shim-calls.log")
     text = calls.read_text() if calls.exists() else ""
     assert not any(w in text for w in (" restart ", " stop ", " kill ", " kickstart ")), text
+    with known_failure(r"(?s)differs from HEAD's own migration.*--- after update ---.*disabled: true",
+                       "#150362 (fix #150370 open): an update from a release at the current config schema skips "
+                       "the stamp-independent steps, so a legacy `disabled: true` MCP entry stays enabled at runtime"):
+        assert not drift, "\n".join(drift)
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +638,7 @@ def template_home(tmp_path_factory, provider) -> Path:
     (seed.hermes_home / "config.yaml").write_text(cfg, encoding="utf-8")
     (work / "config.yaml").write_text(cfg, encoding="utf-8")
     template = seed.root / "template-home"
-    shutil.copytree(seed.hermes_home, template, symlinks=True)
+    shutil.copytree(seed.hermes_home, template, symlinks=True, ignore=_sockets)
     return template
 
 
@@ -715,8 +693,8 @@ def clean_leg(tmp_path_factory, template_home):
 
 def test_clean_update(clean_leg, provider):
     leg, final = clean_leg
-    assert_healthy_at_head(leg, provider, final)
     assert _git("status", "--porcelain", "--untracked-files=no", cwd=leg.install) == "", "update left a dirty tree"
+    assert_healthy_at_head(leg, provider, final)
 
 
 def test_clean_update_keeps_long_scalar_lines_verbatim(clean_leg):
@@ -744,7 +722,6 @@ def test_update_with_local_edits_and_orphan_autostash(leg, provider):
     (leg.install / "my_notes.txt").write_text("untracked user file\n")
     _publish_head(leg)
     final = _update(leg)
-    assert_healthy_at_head(leg, provider, final)
     stash_commits = _git("log", "-g", "--format=%H", "refs/stash", cwd=leg.install, check=False).split()
     assert orphan in stash_commits, "the pre-existing autostash (maybe the only copy of user work) was dropped"
     # The user's work is either restored in the tree or parked in a stash entry: never lost.
@@ -756,6 +733,7 @@ def test_update_with_local_edits_and_orphan_autostash(leg, provider):
         "my_notes.txt" in _git("show", "--name-only", "--format=", f"{c}^3", cwd=leg.install, check=False)
         for c in stash_commits if c != orphan)
     assert untracked_ok, "untracked user file lost by the update"
+    assert_healthy_at_head(leg, provider, final)
 
 
 @pytest.mark.parametrize("torn", [

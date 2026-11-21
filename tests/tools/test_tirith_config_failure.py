@@ -103,8 +103,12 @@ def test_valid_policy_and_existing_bypass_precedence(scanner, monkeypatch, mode)
         monkeypatch.setattr(approval, "_presence", lambda cb: (cb, False, False, False))
         monkeypatch.setattr(approval, "_unattended_contexts", lambda: [approval._CRON_CTX])
         monkeypatch.setattr(approval.approval_context, "_get_cron_approval_mode", lambda: "approve")
+        # A bypass must still approve when the policy cannot be read at all. It cannot be
+        # "no read": the permanent-allowlist set re-syncs hand edits from disk on every
+        # allowlist check (approval._sync_permanent_from_disk), which swallows a failed read
+        # instead of failing the command.
+        load.side_effect = RuntimeError("synthetic unreadable policy")
         assert approval.check_all_command_guards("echo synthetic", "local")["approved"] is True
-        load.assert_not_called()
     else:
         result = approval._tirith_scan("echo synthetic")
         assert result["action"] == ("block" if mode == "fail_closed" else "allow")

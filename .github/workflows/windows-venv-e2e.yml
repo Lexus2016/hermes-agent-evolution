@@ -42,7 +42,7 @@ concurrency:
 jobs:
   venv-holder-e2e:
     name: venv-holder live E2E (windows-latest)
-    runs-on: windows-latest-32-core
+    runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - name: Checkout code

@@ -44,7 +44,9 @@ class _FakeSession:
         # the correction review.
         return self._turn.thread_id
 
-    def run_turn(self, *, user_input):
+    def run_turn(self, *, user_input, **routing):
+        # Production passes the wire model, reasoning effort and service tier alongside
+        # the input (codex_runtime.run_codex_app_server_turn); this stub ignores routing.
         return self._turn
 
     def close(self):

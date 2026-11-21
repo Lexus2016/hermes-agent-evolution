@@ -40,7 +40,9 @@ def test_grounding_survives_real_reload_without_promoting_claimed_trust(tmp_path
             assert row["text"] in prompt
         assert path.read_bytes() == before
         # Approval to STORE content is not approval to perform an arrangement.
-        assert apply_memory_pending({"action": "add", "content": "A stored proposal"}, reloaded)["success"]
+        assert apply_memory_pending(
+            {"action": "add", "target": "memory", "content": "A stored proposal"}, reloaded
+        )["success"]
         assert reloaded.search("memory")[-1]["authorizes_actions"] is False
         assert reloaded.format_for_system_prompt("memory") == prompt
     with profile(tmp_path / "b"):

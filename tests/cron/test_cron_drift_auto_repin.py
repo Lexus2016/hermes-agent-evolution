@@ -14,8 +14,10 @@ Contract:
   a broken repin can never silently enable spend.
 """
 
+import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -32,7 +34,9 @@ def _job(**overrides):
         "enabled": True,
         "state": "scheduled",
         "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
-        "deliver": "local",
+        # A real lane: v0.23.1 never sends for ``local`` (output only), and the
+        # alert-once contract is about a notice leaving the host.
+        "deliver": "telegram:fixture",
         "model": None,
         "provider": None,
         "provider_snapshot": "openrouter",
@@ -44,16 +48,22 @@ def _job(**overrides):
 
 def _write_config(tmp_path, auto_repin):
     """Write a config.yaml enabling/disabling cron.model_drift_auto_repin."""
-    lines = ["model:", "  default: test-model"]
+    # preflight off: this suite is about the drift guard, not the pre-dispatch
+    # credential validation, and the fixture lane has no gateway credentials.
+    lines = ["model:", "  default: test-model", "cron:", "  preflight: false"]
     if auto_repin is not None:
-        lines += ["cron:", f"  model_drift_auto_repin: {auto_repin}"]
+        lines += [f"  model_drift_auto_repin: {auto_repin}"]
     (tmp_path / "config.yaml").write_text("\n".join(lines) + "\n")
 
 
 def _tick(job, tmp_path, current_provider, deliveries):
-    """Run one run_one_job tick with the provider resolution pinned."""
-    fake_db = MagicMock()
+    """Run one run_one_job tick with the provider resolution pinned.
 
+    Since v0.23.1 every fire crosses the restart-safe worker seam, so an
+    in-process ``run_one_job`` only hands the attempt off and returns. The test
+    takes the worker side of that seam itself (the same owner bridge the fork's
+    other cron tests use) and then observes the body in this process.
+    """
     def fake_deliver(job, content, adapters=None, loop=None, **kwargs):
         deliveries.append(content)
         return None
@@ -63,7 +73,6 @@ def _tick(job, tmp_path, current_provider, deliveries):
          patch("cron.scheduler._resolve_origin", return_value=None), \
          patch("hermes_cli.env_loader.load_hermes_dotenv"), \
          patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-         patch("hermes_state.SessionDB", return_value=fake_db), \
          patch("tools.mcp_tool.discover_mcp_tools", return_value=[]), \
          patch("hermes_cli.runtime_provider.resolve_runtime_provider",
                return_value={
@@ -79,7 +88,36 @@ def _tick(job, tmp_path, current_provider, deliveries):
         mock_agent = MagicMock()
         mock_agent.run_conversation.return_value = {"final_response": "ok"}
         mock_agent_cls.return_value = mock_agent
-        ok = sched.run_one_job(job)
+        from cron import delivery_queue, executions
+        from gateway import session_cron
+        from hermes_state_registry import acquire, release_or_close
+
+        # v0.23.1 executes an agent fire in the gateway owner unless this context
+        # is the admitted one, and the owner's store must be the canonical one,
+        # so the test holds a real store and owns the fire like the ticker does.
+        db = acquire(tmp_path / "state.db")
+        execution = executions.create_execution(job["id"], source="test")
+        job = dict(job, execution_id=execution["id"])
+        prior = os.environ.get("_HERMES_CRON_EXTERNAL_WORKER")
+        os.environ["_HERMES_CRON_EXTERNAL_WORKER"] = execution["id"]
+        owner = SimpleNamespace(db=db)
+        token = session_cron._execution.set(
+            (owner, "drift-test-session", job["id"], execution["id"]))
+        prior_queue = delivery_queue.DELIVERY_DB
+        delivery_queue.DELIVERY_DB = tmp_path / "cron" / "deliveries.db"
+        try:
+            ok = sched.run_one_job(job)
+            # v0.23.1 hands every run's send to the durable queue and lets the
+            # gateway drain it; the test drains the way a gateway does.
+            sched.drain_delivery_queue(None, None)
+        finally:
+            delivery_queue.DELIVERY_DB = prior_queue
+            session_cron._execution.reset(token)
+            release_or_close(db)
+            if prior is None:
+                os.environ.pop("_HERMES_CRON_EXTERNAL_WORKER", None)
+            else:
+                os.environ["_HERMES_CRON_EXTERNAL_WORKER"] = prior
     return ok, mock_agent_cls.called
 
 
@@ -101,6 +139,9 @@ class TestDriftAutoRepin:
 
             stored = _stored(tmp_path)
             assert stored.get("drift_alerted") is True
+            # The dedicated status is what `cron repin --drifted` and the dashboard
+            # filter on; a generic "error" would hide the job from both.
+            assert stored.get("last_status") == "drift_skip"
         assert len(deliveries) == 1
         assert "drift" in deliveries[0].lower()
 
