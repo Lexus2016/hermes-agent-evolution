@@ -11,6 +11,7 @@ the delegation call and the summary result, never the child's intermediate
 tool calls or reasoning.
 """
 
+import contextlib
 import json
 import logging
 import re
@@ -34,16 +35,19 @@ from tools.delegate_tool_child_run import (
     _lease_child_credential, _merge_late_steer, _register_child, _reserve_child_transcript, _start_heartbeat, _validate_child_output_schema,
 )
 from tools.delegate_tool_config import (
-    _DEFAULT_MAX_CONCURRENT_CHILDREN, _get_child_timeout, _get_max_async_children, _get_max_concurrent_children,
+    _DEFAULT_MAX_CONCURRENT_CHILDREN, _MIN_SPAWN_DEPTH, _get_child_timeout, _get_max_async_children,
+    _get_max_concurrent_children,
     _get_max_spawn_depth, _get_oneshot_max_children, _get_orchestrator_enabled, _get_subagent_approval_callback, _get_worktree_isolation,
-    _inherit_parent_capabilities, _load_config, _merge_request_overrides, _resolve_child_credential_pool,
+    _inherit_parent_base_url, _inherit_parent_capabilities, _load_config, _merge_request_overrides,
+    _resolve_child_credential_pool,
     _resolve_child_runtime, _resolve_delegation_credentials,
     _subagent_auto_approve, _subagent_auto_deny,
 )
 from tools.delegate_tool_dispatch import _Batch, _announce_batch, _capture_origin, _run_batch
 from tools.delegate_tool_progress import (
-    DelegateEvent, SUBAGENT_FAILURE_STATUSES, _batch_prefix, _build_child_progress_callback,
-    _build_child_system_prompt, _clean_error_text, _emit_parent_console, _quiet, _resolve_workspace_hint,
+    DelegateEvent, SUBAGENT_FAILURE_STATUSES, _LEGACY_EVENT_MAP, _batch_prefix, _build_child_progress_callback,
+    _build_child_system_prompt, _clean_error_text, _detect_escalation, _emit_parent_console, _quiet,
+    _resolve_workspace_hint,
     _safe_progress, format_batch_tag, format_subagent_failure_line,
 )
 from tools.delegate_tool_registry import (
@@ -60,7 +64,8 @@ from tools.delegate_tool_toolsets import (
     DELEGATE_BLOCKED_TOOLS, _expand_parent_toolsets, _resolve_child_toolsets, _strip_blocked_tools,
 )
 from tools.delegate_tool_results import (
-    _apply_summary_budget, _build_child_preserving_parent_tools, _run_child_lifecycle, _summarize_tool_arguments,
+    _apply_summary_budget, _build_child_preserving_parent_tools, _extract_output_tail, _run_child_lifecycle,
+    _summarize_tool_arguments,
 )
 
 _ROLES = frozenset({"leaf", "orchestrator"})
@@ -204,6 +209,43 @@ def _apply_child_compression_cap(child, delegation_cfg: dict) -> None:
         cc._apply_threshold_tokens_cap()
 
 
+def _resolve_team_identity(task: dict[str, Any], index: Any = None) -> Optional[tuple[str, str]]:
+    team = task.get("team") if isinstance(task, dict) else None
+    if not isinstance(team, dict):
+        return None
+    team_id = str(team.get("team_id") or "").strip()
+    if not team_id or ".." in team_id or "/" in team_id:
+        return None
+    member = str(team.get("member") or "").strip()
+    if not member:
+        try:
+            member = f"teammate-{int(index)}"
+        except (TypeError, ValueError):
+            return None
+    return (team_id, member)
+
+def _ensure_team_toolset(child_toolsets, parent_agent, team_identity=None):
+    if child_toolsets is None:
+        parent_enabled = getattr(parent_agent, "enabled_toolsets", None) if parent_agent is not None else None
+        base = list(parent_enabled) if parent_enabled is not None else ["terminal", "file", "web"]
+    else:
+        base = list(child_toolsets)
+    if "agent_team" not in base:
+        base.append("agent_team")
+    return base
+
+@contextlib.contextmanager
+def _team_identity_scope(team_identity):
+    if team_identity is None:
+        yield
+        return
+    from tools.agent_team import clear_thread_identity, set_thread_identity
+    set_thread_identity(*team_identity)
+    try:
+        yield
+    finally:
+        clear_thread_identity()
+
 def _build_child_agent(
     task_index: int,
     goal: str,
@@ -233,6 +275,8 @@ def _build_child_agent(
     override_reasoning_effort: Any = None,
     profile_home: Optional[Path] = None,
     override_service_tier: Optional[str] = None,  # a route's checked speed tier (tools/delegate_tool_tuning.py)
+    # Core-owned teammate identity (task "team"): grants the agent_team toolset to this child.
+    team: Optional[dict[str, Any]] = None,
 ):
     """Build (don't run) a child AIAgent on the main thread. override_* (from delegation config) replace parent
     inheritance so children can run on a different provider:model pair. ``profile_home`` builds (and later runs,
@@ -257,6 +301,10 @@ def _build_child_agent(
     # as auxiliary.review.
     delegation_cfg = _load_config()
     child_toolsets, child_disabled_toolsets = _resolve_child_toolsets(parent_agent, toolsets, effective_role)
+    # Granted after the parent intersection: the parent usually does not hold agent_team itself,
+    # so resolving it as a requested toolset would drop it.
+    if team:
+        child_toolsets = _ensure_team_toolset(child_toolsets, parent_agent)
     child_prompt = _build_child_system_prompt(
         goal, context, workspace_path=_resolve_workspace_hint(parent_agent), role=effective_role,
         max_spawn_depth=max_spawn, child_depth=child_depth,
@@ -537,12 +585,18 @@ def _build_children(
         if _task_schema is not None:
             _child_context = append_output_contract(_child_context, _task_schema)
         try:
-            child = _build_child_preserving_parent_tools(
-                task_index=i, goal=t["goal"], context=_child_context,
-                toolsets=None,  # always inherit the parent's toolsets
-                model=route.creds["model"], max_iterations=max_iterations, task_count=len(task_list),
-                parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role), **_route_overrides(route),
+            team_identity = _resolve_team_identity(t, i)
+            granted_toolsets = (
+                _ensure_team_toolset(None, parent_agent, team_identity) if team_identity else None
             )
+            with _team_identity_scope(team_identity):
+                child = _build_child_preserving_parent_tools(
+                    task_index=i, goal=t["goal"], context=_child_context,
+                    toolsets=granted_toolsets,  # None inherits the parent's toolsets wholesale
+                    model=route.creds["model"], max_iterations=max_iterations, task_count=len(task_list),
+                    parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role),
+                    team=t.get("team"), **_route_overrides(route),
+                )
         except ValueError as exc:
             # An owner refusal can land mid-batch: the siblings built so far hold reservations.
             for _, _, built in children:
