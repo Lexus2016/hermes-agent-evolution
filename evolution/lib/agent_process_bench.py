@@ -13,8 +13,9 @@ BLOCK_THRESHOLD = 1.0
 _SHELL_TOOLS = ("shell", "terminal", "bash")
 
 # File-authoring tools: their payload is source text, so a mention of ".env" is a
-# reference to a secrets file (load_dotenv, open("keys.env")), not an access to it.
-# Real credential writes are still refused by the path denylist in agent/file_safety.py.
+# reference to a secrets file (load_dotenv, open("keys.env")), and "curl ... https://"
+# in a comment or script body is text, not an executed network call. Real credential
+# writes are still refused by the path denylist in agent/file_safety.py.
 _FILE_WRITE_TOOLS = ("write_file", "patch")
 
 # Only a plain curl health-check shape earns a loopback exemption. Unknown options,
@@ -106,12 +107,12 @@ _HARM_RE = re.compile(
 
 
 def _flags_for(tool: str, content: str) -> list[str]:
-    skip_cred = tool in _FILE_WRITE_TOOLS
+    skip_text_only = tool in _FILE_WRITE_TOOLS
     m = next(
         (
             hit
             for hit in _HARM_RE.finditer(_without_loopback_targets(content))
-            if not (skip_cred and hit.group("cred"))
+            if not (skip_text_only and (hit.group("cred") or hit.group("exfil")))
         ),
         None,
     )
