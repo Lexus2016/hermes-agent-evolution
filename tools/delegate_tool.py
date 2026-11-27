@@ -17,8 +17,9 @@ import logging
 import re
 import time
 import weakref
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from tools.terminal_tool import set_approval_callback as _set_subagent_approval_cb
 from utils import is_truthy_value
@@ -313,17 +314,22 @@ def _build_child_agent(
     if (not parent_api_key) and hasattr(parent_agent, "_client_kwargs"):
         parent_api_key = parent_agent._client_kwargs.get("api_key")
 
+    # Model routing (#2317): an advisory pick from delegation.routing, used only when the
+    # caller pinned no model. A provider route's own model still wins through ``model``.
+    routed_model = _route_subagent_model(goal, context, task_index)
+    resolved_model = model or routed_model or getattr(parent_agent, "model", None)
+
     # Shared ref: session_id once the child exists, delegation_id once
     # delegate_task stamps it — both ride on every relayed event.
     child_session_ref: dict[str, Any] = {}
     child_progress_cb = _build_child_progress_callback(
         task_index, goal, parent_agent, task_count, subagent_id=subagent_id, parent_id=parent_subagent_id,
         depth=max(0, child_depth - 1),  # 0 = first-level child for the UI
-        model=model or getattr(parent_agent, "model", None), toolsets=child_toolsets, session_ref=child_session_ref,
+        model=resolved_model, toolsets=child_toolsets, session_ref=child_session_ref,
     )
     with delegated_profile_scope(profile_home):
         rt = _resolve_child_runtime(
-            parent_agent, delegation_cfg, parent_api_key, model=model, override_provider=override_provider,
+            parent_agent, delegation_cfg, parent_api_key, model=model or routed_model, override_provider=override_provider,
             override_base_url=override_base_url, override_api_key=override_api_key, override_api_mode=override_api_mode,
             override_acp_command=override_acp_command,
             override_acp_args=override_acp_args,
@@ -528,6 +534,63 @@ def _run_single_child_impl(
 
         duration = run.elapsed()
         entry = _build_result_entry(child, result, task_index, duration, schema)
+        # Bounded shallow auto-retry (#323). Empty ``messages`` is a synthetic
+        # stub (output_schema / finite-batch harnesses), not a real narrative
+        # turn — don't retry those. Retry and the #102 prefix apply only when
+        # the goal asked for evidence a subagent cannot invent; a completion
+        # token / trivial narration is a valid no-tool result (finite chat).
+        shallow_retries = 0
+        _child_is_orchestrator = getattr(child, "_delegate_role", None) == "orchestrator"
+        _had_conversation = bool((result or {}).get("messages") if isinstance(result, dict) else None)
+        _schema_raw = getattr(child, "_delegate_output_schema", None)
+        _schema_child = isinstance(_schema_raw, dict)
+        _expects_tools = _goal_expects_tools(goal)
+        if (
+            entry.get("status") == "completed"
+            and not entry.get("tool_trace")
+            and not _child_is_orchestrator
+            and _had_conversation
+            and not _schema_child
+            and _expects_tools
+        ):
+            retry_budget = _get_shallow_retry_budget()
+            while shallow_retries < retry_budget and not entry.get("tool_trace"):
+                shallow_retries += 1
+                escalated_goal = _escalate_shallow_goal(goal, shallow_retries)
+                try:
+                    retry_result = child.run_conversation(
+                        user_message=escalated_goal,
+                        task_id=run.child_task_id,
+                        stream_callback=run.relay_text,
+                    )
+                    retry_outcome = _derive_child_outcome(retry_result)
+                    if retry_outcome["tool_trace"]:
+                        result = retry_result
+                        entry = _build_result_entry(child, result, task_index, run.elapsed(), schema)
+                        break
+                except Exception:
+                    break
+
+        if shallow_retries:
+            entry["shallow_retries"] = shallow_retries
+
+        if (
+            entry.get("status") == "completed"
+            and not entry.get("tool_trace")
+            and not _schema_child
+            and _expects_tools
+        ):
+            entry["shallow_result"] = True
+            _retry_note = (
+                f" Auto-retry exhausted ({shallow_retries} attempt(s)) and the subagent still made no tool calls."
+                if shallow_retries else ""
+            )
+            entry["summary"] = (
+                "⚠️ SHALLOW DELEGATION: this subagent made NO tool calls — the text below is narrative from model memory, "
+                "not extracted data. If you asked for file contents, search results, or computed values, treat this as a "
+                "failure and either re-delegate with explicit tool instructions or do the work inline."
+                + _retry_note + "\n\n" + (entry.get("summary") or "")
+            )
         run.append_sibling_write_reminder(entry)
         run.account_background_processes(entry)
         run.emit_complete(result, entry, duration)
@@ -720,6 +783,15 @@ def delegate_task(
             max_iterations, default_max_iter,
         )
     max_children = _get_max_concurrent_children()
+    # Expand known template markers (#95) BEFORE the batch quality gate so
+    # <NOW-ISO> / {date} substitute instead of being rejected as residual.
+    _sess_id = getattr(parent_agent, "session_id", None)
+    if isinstance(goal, str):
+        goal, _, _ = expand_template_markers(goal, session_id=_sess_id)
+    if isinstance(tasks, list):
+        for _t in tasks:
+            if isinstance(_t, dict) and isinstance(_t.get("goal"), str):
+                _t["goal"], _, _ = expand_template_markers(_t["goal"], session_id=_sess_id)
     task_list, err = _normalize_task_list(goal, context, tasks, output_schema, top_role, max_children)
     if not err:
         task_schemas, err = _coerce_task_schemas(task_list, output_schema)
@@ -1239,6 +1311,124 @@ _TIMESTAMP_MARKER_KEYS = frozenset({"now-iso", "generated-timestamp", "current-d
 _DATE_MARKER_KEYS = frozenset({"date", "current-date", "today"})
 
 _SESSION_MARKER_KEYS = frozenset({"session-id"})
+
+
+def _now_iso_utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _marker_token(marker: str) -> str:
+    inner = (marker or "").strip()
+    for _ in range(2):
+        if len(inner) >= 2 and inner[0] in "<{" and inner[-1] in ">}":
+            inner = inner[1:-1]
+        else:
+            break
+    return _MARKER_SEP_RE.sub("-", inner.strip().lower())
+
+
+def expand_template_markers(
+    text: str,
+    *,
+    now_iso: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Tuple[str, List[str], List[str]]:
+    now_iso = now_iso if now_iso is not None else _now_iso_utc()
+    today = now_iso[:10]
+    values: Dict[str, str] = {key: now_iso for key in _TIMESTAMP_MARKER_KEYS}
+    values.update({key: today for key in _DATE_MARKER_KEYS})
+    if session_id:
+        values.update({key: session_id for key in _SESSION_MARKER_KEYS})
+    substituted: List[str] = []
+    residual: List[str] = []
+
+    def _repl(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        key = _marker_token(raw)
+        if key in values:
+            substituted.append(raw)
+            return values[key]
+        residual.append(raw)
+        return raw
+
+    expanded = _TEMPLATE_MARKER_RE.sub(_repl, text)
+    return expanded, substituted, residual
+
+
+def _goal_expects_tools(goal: str) -> bool:
+    """True when the goal asked for evidence a subagent cannot invent (read/search/quote)."""
+    text = (goal or "").lower()
+    return any(tok in text for tok in ("read", "quote", "search", "extract", "grep", "fetch", "file"))
+
+
+def _get_shallow_retry_budget() -> int:
+    try:
+        cfg = _load_config()
+        val = cfg.get("shallow_retry_max", _DEFAULT_SHALLOW_RETRY_BUDGET)
+        return max(0, min(int(val), _SHALLOW_RETRY_BUDGET_MAX))
+    except Exception:
+        return _DEFAULT_SHALLOW_RETRY_BUDGET
+
+
+def _escalate_shallow_goal(goal: str, retry_number: int) -> str:
+    return (
+        f"⚠️ PREVIOUS ATTEMPT FAILED: You provided a narrative response without "
+        f"calling any tools. You MUST use available tools to inspect real state "
+        f"before answering.\n\nOriginal goal: {goal}"
+    )
+
+
+def _derive_child_outcome(result: Dict[str, Any]) -> Dict[str, Any]:
+    summary = result.get("final_response") or ""
+    completed = bool(result.get("completed", False))
+    interrupted = bool(result.get("interrupted", False))
+    api_calls = result.get("api_calls", 0)
+    failed = bool(result.get("failed", False)) or bool(result.get("error"))
+    status = "interrupted" if interrupted else ("failed" if failed else ("completed" if completed else "failed"))
+    exit_reason = "interrupted" if interrupted else ("error" if failed else ("completed" if completed else "max_iterations"))
+    from tools.delegate_tool_child_run import _build_tool_trace
+    tool_trace = _build_tool_trace(result.get("messages") or [])
+    return {
+        "summary": summary,
+        "completed": completed,
+        "interrupted": interrupted,
+        "api_calls": api_calls,
+        "status": status,
+        "tool_trace": tool_trace,
+        "exit_reason": exit_reason,
+    }
+
+
+def _route_subagent_model(goal: str, context: Optional[str], task_index: int) -> Optional[str]:
+    try:
+        delegation_cfg = _load_config()
+        routing_cfg = delegation_cfg.get("routing") or {}
+        if not routing_cfg.get("enabled"):
+            return None
+        from tools.model_routing_table import RoutingTable, classify_task
+        _routing_models = routing_cfg.get("models") or []
+        if not _routing_models:
+            return None
+        _task = {"type": goal, "tags": [context or ""]}
+        _routing_table = RoutingTable(models=list(_routing_models))
+        try:
+            from evolution.lib.caf_loop import default_routing_table_path, load_routing_table
+            _saved = load_routing_table(default_routing_table_path())
+            if _saved.models:
+                _saved.models = list(dict.fromkeys(_routing_models + _saved.models))
+                _routing_table = _saved
+        except Exception:
+            pass
+        _routed = _routing_table.select_model(_task)
+        if _routed:
+            logger.info(
+                "delegate_task: routing subagent %d to model %r (task dimension %r) — #2317",
+                task_index, _routed, classify_task(_task),
+            )
+        return _routed
+    except Exception as _routing_err:
+        logger.debug("delegate_task: routing disabled/failed (%s)", _routing_err)
+        return None
 
 def _goal_hard_requires_terminal(goal: str, context: Optional[str] = None) -> bool:
     text = goal or ""
