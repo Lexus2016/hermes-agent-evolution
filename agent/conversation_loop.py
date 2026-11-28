@@ -32,6 +32,7 @@ from agent.prompt_caching import (
 )
 from agent.fallback_cooldown import FailoverReason
 from agent.repetition_guard import REPETITION_LOOP_INTERRUPTED, is_runaway_repetition
+from agent.retry_utils import retry_budget_for
 from agent.runtime_cwd import resolve_agent_cwd
 from agent.surface_switch import (
     identity_line_value, note_inert_pinned_tools, runtime_host_value, stage_surface_switch_note,
@@ -1983,7 +1984,8 @@ def _run_conversation_turn(
             continue
         _run_phase(announce_api_call, agent, s)
 
-        s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, agent._api_max_retries
+        s.api_start_time, s.retry_count = time.time(), 0
+        s.max_retries = retry_budget_for(agent)
         s._retry, s.finish_reason, s.response, s.api_kwargs = TurnRetryState(), "stop", None, None
         s.api_request_id = agent._current_api_request_id = f"{s.turn_id}:api:{s.api_call_count}"
 
