@@ -655,6 +655,16 @@ def _resolve_child_runtime(
     # ACP client and bypass the override credentials entirely (issue #16816).
     if override_provider and not override_acp_command:
         effective_acp_command, effective_acp_args = None, []
+    # Defensive: validate trusted delegation.command exists on PATH before honoring it. An explicitly pinned
+    # transport that cannot run must fail the spawn loudly (#80450) — silently falling back to the default
+    # transport would run the child somewhere the user explicitly routed it away from. Normally unreachable
+    # via delegate_task, which pre-validates the command in _resolve_delegation_credentials.
+    if override_acp_command and not override_provider:
+        from providers import get_provider_profile
+        profile = get_provider_profile(effective_provider or "")
+        # A generic process command does not imply the legacy ACP protocol.
+        if profile is None or profile.auth_type != "external_process":
+            effective_provider, effective_api_mode = "copilot-acp", "chat_completions"
     # A pinned command arrives only with the runtime of the provider that resolved it, so the selected
     # provider (and its api_mode) is kept as is.
 

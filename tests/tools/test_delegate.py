@@ -703,6 +703,9 @@ class TestDelegateTask(unittest.TestCase):
             )
 
         self.assertTrue(callable(mock_child.thinking_callback))
+        # Building the child announces its spawn on the parent's progress callback (lifecycle event,
+        # relayed by _build_child_progress_callback). The thinking TEXT must never take that path.
+        parent.tool_progress_callback.reset_mock()
         mock_child.thinking_callback("deliberating...")
         parent.tool_progress_callback.assert_not_called()
     def test_child_dedicated_db_follows_parents_db_path(self):

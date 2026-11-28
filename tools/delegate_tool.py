@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import re
+import shutil
 import time
 import weakref
 from datetime import datetime, timezone
@@ -70,6 +71,14 @@ from tools.delegate_tool_results import (
 )
 
 _ROLES = frozenset({"leaf", "orchestrator"})
+
+_KNOWN_ACP_BINARIES: tuple[str, ...] = ("copilot", "claude", "codex")
+
+
+def _acp_binary_available(cmd: Optional[str] = None) -> bool:
+    if cmd:
+        return bool(shutil.which(cmd))
+    return any(shutil.which(name) for name in _KNOWN_ACP_BINARIES)
 
 
 def _parent_live_home(parent_agent: Any) -> Optional[Path]:
@@ -306,9 +315,21 @@ def _build_child_agent(
     # so resolving it as a requested toolset would drop it.
     if team:
         child_toolsets = _ensure_team_toolset(child_toolsets, parent_agent)
+    # Toolsets explicitly requested but missing from the FINAL child list (#648) — computed against
+    # child_toolsets AFTER every adjustment above (parent intersection, blocked-tool stripping), not
+    # against an intermediate state, so the note always reflects what the child actually ended up with.
+    # Deduplicated and order-preserving. Only meaningful when toolsets were explicitly requested —
+    # omitting toolsets inherits the parent wholesale, so nothing was denied.
+    denied_toolsets: list[str] = []
+    if toolsets:
+        _seen_denied: set = set()
+        for _t in toolsets:
+            if child_toolsets is not None and _t not in child_toolsets and _t not in _seen_denied:
+                denied_toolsets.append(_t)
+                _seen_denied.add(_t)
     child_prompt = _build_child_system_prompt(
         goal, context, workspace_path=_resolve_workspace_hint(parent_agent), role=effective_role,
-        max_spawn_depth=max_spawn, child_depth=child_depth,
+        max_spawn_depth=max_spawn, child_depth=child_depth, denied_toolsets=denied_toolsets,
     )
     parent_api_key = getattr(parent_agent, "api_key", None)
     if (not parent_api_key) and hasattr(parent_agent, "_client_kwargs"):
@@ -624,23 +645,28 @@ def _run_single_child_impl(
         run.cleanup(heartbeat=heartbeat, child_pool=child_pool, leased_cred_id=leased_cred_id, close_deferred=_child_close_deferred)
 
 
-def _credential_overrides(creds: dict[str, Any], routing_cfg: dict[str, Any]) -> dict[str, Any]:
+def _credential_overrides(
+    creds: dict[str, Any], routing_cfg: dict[str, Any],
+    acp_command: Optional[str] = None, acp_args: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """``_build_child_agent`` override kwargs for a resolved credential bundle (delegate_task and the lifecycle API)."""
     return {
         "override_provider": creds["provider"], "override_base_url": creds["base_url"],
         "override_api_key": creds["api_key"], "override_api_mode": creds["api_mode"],
         "override_request_overrides": creds.get("request_overrides"),
-        "override_acp_command": creds.get("command"),
-        "override_acp_args": creds.get("args"),
+        "override_acp_command": acp_command if acp_command is not None else creds.get("command"),
+        "override_acp_args": acp_args if acp_args is not None else creds.get("args"),
         "override_service_tier": creds.get("service_tier"),
         "routing_cfg": routing_cfg,
     }
 
 
-def _route_overrides(route: Any) -> dict[str, Any]:
+def _route_overrides(
+    route: Any, acp_command: Optional[str] = None, acp_args: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """``_build_child_agent`` kwargs for one task route (``tools.delegate_tool_routes.TaskRoute``)."""
     return {
-        **_credential_overrides(route.creds, route.routing_cfg),
+        **_credential_overrides(route.creds, route.routing_cfg, acp_command=acp_command, acp_args=acp_args),
         "override_reasoning_effort": route.reasoning_effort, "profile_home": route.profile_home,
     }
 
@@ -649,6 +675,7 @@ def _build_children(
     task_list: list[dict[str, Any]], task_schemas: list[Optional[dict[str, Any]]], routes: list[Any], *,
     top_role: str, max_iterations: int, parent_agent,
     live_deleg_id: Optional[str], live_writers: list, task_images: Optional[list[Optional[list[str]]]] = None,
+    acp_command: Optional[str] = None, acp_args: Optional[list[str]] = None,
 ) -> tuple[list[tuple], Optional[str]]:
     """Build every child on the main thread (construction is not thread-safe), each on its task's route;
     ``(children, None)`` or ``([], error)`` on an explicit-pin preflight failure."""
@@ -674,7 +701,8 @@ def _build_children(
                     toolsets=granted_toolsets,  # None inherits the parent's toolsets wholesale
                     model=route.creds["model"], max_iterations=max_iterations, task_count=len(task_list),
                     parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role),
-                    team=t.get("team"), **_route_overrides(route),
+                    team=t.get("team"),
+                    **_route_overrides(route, acp_command=acp_command, acp_args=acp_args),
                 )
         except ValueError as exc:
             # An owner refusal can land mid-batch: the siblings built so far hold reservations.
@@ -956,6 +984,7 @@ def delegate_task(
     children, err = _build_children(
         task_list, task_schemas, routes, top_role=top_role, max_iterations=default_max_iter, parent_agent=parent_agent,
         live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images,
+        acp_command=acp_command, acp_args=acp_args,
     )
     if err:
         return tool_error(err)
@@ -1031,7 +1060,7 @@ def _build_top_level_description(*, independent_completions=None) -> str:
 _DELIVERY_INDEPENDENT, _DELIVERY_JOINED = "each ungrouped task / `group` returns on its own", "one message per call"
 
 _DESCRIPTION_DELIVERY = (
-    "Sessions without a later-result consumer (including one-shot CLI and cron) join parallel children "
+    "Sessions without a later-result consumer (one-shot CLI, cron) join parallel children "
     "and return results in this tool call. "
     "Otherwise runs in the background: dispatch returns live transcript paths and results re-enter "
     "as a new message when subagents finish ({delivery}). Background results are delivered only "
@@ -1042,7 +1071,8 @@ _DESCRIPTION_DELIVERY = (
 _ONESHOT_DESCRIPTION_DELIVERY = "Parallel children are joined and their results return in this tool call.\n\n"
 _DESCRIPTION_HEAD = (
     "Spawn isolated subagents for parallel or context-heavy work. Each gets its own conversation, terminal "
-    "session, and toolset, and only its final summary returns to you. Pass every task in `tasks` — one entry spawns one subagent, several run in parallel "
+    "session and toolset; only its final summary returns to you. Pass every task in `tasks` — one entry "
+    "per subagent; several run in parallel "
     "(limit in the tasks description).\n\n"
     + _DESCRIPTION_DELIVERY +
     "USE FOR: reasoning-heavy subtasks, work that would flood your context, or independent parallel workstreams.\n"
@@ -1096,6 +1126,15 @@ def _build_dynamic_schema_overrides() -> dict:
             k: v for k, v in tasks["items"]["properties"].items() if k != "group"
         }}
 
+    # Model-supplied acp_command is a hallucination risk on hosts without an ACP CLI (headless deploys
+    # usually have none): prune the fields entirely so the model cannot invent a transport (#648 review).
+    if not _acp_binary_available():
+        for _k in ("acp_command", "acp_args"):
+            overrides_params["properties"].pop(_k, None)
+        tasks = overrides_params["properties"]["tasks"]
+        tasks["items"] = {**tasks["items"], "properties": {
+            k: v for k, v in tasks["items"]["properties"].items() if k not in ("acp_command", "acp_args")
+        }}
     # The active delegation provider's per-task parameters and guidance (delegation.backend; none for the
     # built-in default). Built from config with the rest of the definition, never per turn.
     from tools.delegate_tool_routes import schema_extension
