@@ -534,6 +534,19 @@ def _run_single_child_impl(
 
         duration = run.elapsed()
         entry = _build_result_entry(child, result, task_index, duration, schema)
+        if harness is not None:
+            try:
+                if harness.status == HarnessStatus.KILLED:
+                    _reasons = [
+                        e.details.get("reason", "halted")
+                        for e in harness.events
+                        if e.event_type == "harness.kill"
+                    ]
+                    entry["harness_kill_reason"] = _reasons[-1] if _reasons else "halted"
+                elif harness.status == HarnessStatus.PAUSED:
+                    entry["harness_kill_reason"] = "harness paused (limits reached)"
+            except Exception:
+                logger.debug("harness outcome annotation failed", exc_info=True)
         # Bounded shallow auto-retry (#323). Empty ``messages`` is a synthetic
         # stub (output_schema / finite-batch harnesses), not a real narrative
         # turn — don't retry those. Retry and the #102 prefix apply only when
@@ -605,6 +618,9 @@ def _run_single_child_impl(
             preview=str(exc), summary=str(exc), status="failed",
         )
     finally:
+        if _harness_sid:
+            _SUBAGENT_HARNESSES.pop(_harness_sid, None)
+        set_hermes_subagent_context(False)
         run.cleanup(heartbeat=heartbeat, child_pool=child_pool, leased_cred_id=leased_cred_id, close_deferred=_child_close_deferred)
 
 
@@ -737,6 +753,94 @@ def _oneshot_spawn_budget(parent_agent: Any, requested: int) -> Optional[str]:
     return None
 
 
+def _delegate_guard_session_id(parent_agent: Any, origin: tuple) -> str:
+    """Session id the delegation side-channel hooks (loop guard, audit, stats) key on."""
+    return str(getattr(parent_agent, "session_id", None) or (origin[1] if len(origin) > 1 else "") or "")
+
+
+def _apply_delegate_loop_guard(res_data: dict[str, Any], tasks: Any, parent_agent: Any, origin: tuple) -> None:
+    """Record this batch's outcomes and expose a tripped consecutive-failure guard (#3224)."""
+    try:
+        from tools.delegate_loop_guard import DELEGATE_LOOP_GUARD
+
+        _tripped, _count, _diag = DELEGATE_LOOP_GUARD.record_and_evaluate(
+            _delegate_guard_session_id(parent_agent, origin), tasks, res_data["results"],
+        )
+        if _tripped:
+            res_data["delegate_loop_guard_tripped"] = True
+            res_data["consecutive_delegate_failures"] = _count
+            res_data["strategy_recommendation"] = _diag
+    except Exception:
+        logger.debug("delegate loop guard failed", exc_info=True)
+
+
+def _record_delegation_audit(
+    results: list[dict[str, Any]], parent_agent: Any, live_deleg_id: Optional[str], origin: tuple,
+) -> None:
+    """Append one delegation event per child to the tamper-evident audit trail (#3065)."""
+    try:
+        from agent.audit_trail import record_event
+
+        _sid = _delegate_guard_session_id(parent_agent, origin) or "delegation"
+        for _entry in results:
+            _idx = _entry.get("task_index", 0)
+            _refs = []
+            _lt = _entry.get("live_transcript")
+            if _lt:
+                _refs.append(str(_lt))
+            elif live_deleg_id:
+                # no-tmp: ok - historical delegation log path
+                _refs.append(f"/tmp/hermes/delegations/{live_deleg_id}/task-{_idx}.log")
+            record_event(
+                event_type="delegation",
+                session_id=_sid,
+                tool_name="delegate_task",
+                status="success" if _entry.get("status") == "completed" else "failure",
+                artifact_refs=_refs,
+                metadata={
+                    "task_index": _idx,
+                    "status": _entry.get("status"),
+                    "exit_reason": _entry.get("exit_reason"),
+                    "api_calls": _entry.get("api_calls", 0),
+                    "duration_seconds": _entry.get("duration_seconds", 0.0),
+                },
+                task_id=f"{live_deleg_id}_task_{_idx}" if live_deleg_id else None,
+            )
+    except Exception:
+        logger.debug("delegation audit trail failed", exc_info=True)
+
+
+def _record_delegate_session_stats(results: list[dict[str, Any]], parent_agent: Any, origin: tuple) -> None:
+    """Feed the batch into the per-session delegation stats rollup (#3225)."""
+    try:
+        from tools.delegate_session_stats import DELEGATE_SESSION_STATS
+
+        DELEGATE_SESSION_STATS.record(_delegate_guard_session_id(parent_agent, origin), results)
+    except Exception:
+        logger.debug("delegation session stats failed", exc_info=True)
+
+
+def _postprocess_delegate_result(
+    res_str: str, preflight_errors: list[dict[str, Any]], tasks: Any, goal: Optional[str],
+    parent_agent: Any, live_deleg_id: Optional[str], origin: tuple,
+) -> str:
+    """Merge preflight error entries and run the host-owned side channels on a joined result."""
+    try:
+        res_data = json.loads(res_str)
+        if isinstance(res_data, dict) and "results" in res_data:
+            if preflight_errors:
+                res_data["results"] = sorted(
+                    preflight_errors + res_data["results"], key=lambda r: r.get("task_index", 0),
+                )
+            _record_delegation_audit(res_data["results"], parent_agent, live_deleg_id, origin)
+            _record_delegate_session_stats(res_data["results"], parent_agent, origin)
+            _apply_delegate_loop_guard(res_data, tasks or [{"goal": goal}], parent_agent, origin)
+            return json.dumps(res_data, ensure_ascii=False)
+    except Exception:
+        logger.debug("delegate result post-processing failed", exc_info=True)
+    return res_str
+
+
 def delegate_task(
     goal: Optional[str] = None, context: Optional[str] = None, tasks: Optional[list[dict[str, Any]]] = None,
     max_iterations: Optional[int] = None, role: Optional[str] = None, background: Optional[bool] = None,
@@ -855,12 +959,49 @@ def delegate_task(
     )
     if err:
         return tool_error(err)
+
+    # Empty-toolset validation (#1387): a child whose inherited toolsets resolve to zero tools after blocked-tool
+    # removal is never launched. It becomes a structured error entry, so the {'results': [...]} contract holds and
+    # one empty sibling cannot take the whole batch down.
+    preflight_errors: list[dict[str, Any]] = []
+    valid_children: list[tuple] = []
+    for (i, t, child) in children:
+        if (
+            hasattr(child, "valid_tool_names")
+            and not child.valid_tool_names
+            and hasattr(child, "_delegate_resolved_toolsets")
+            and not child._delegate_resolved_toolsets
+        ):
+            _role = getattr(child, "_delegate_role", None)
+            preflight_errors.append({
+                "task_index": i,
+                "status": "error",
+                "summary": None,
+                "error": (
+                    "Delegation toolset validation failed: inherited toolsets "
+                    "resolved to zero tools after removing blocked tools."
+                ),
+                "exit_reason": "error",
+                "api_calls": 0,
+                "duration_seconds": 0.0,
+                "_child_role": _role if isinstance(_role, str) else None,
+            })
+        else:
+            valid_children.append((i, t, child))
+    if preflight_errors and not valid_children:
+        res_data: dict[str, Any] = {"results": preflight_errors, "total_duration_seconds": 0.0}
+        _apply_delegate_loop_guard(res_data, tasks or [{"goal": goal}], parent_agent, origin)
+        return json.dumps(res_data, ensure_ascii=False)
+
     batch = _Batch(
-        task_list, children, parent_agent, creds, context, top_role, max_children,
+        task_list, valid_children or children, parent_agent, creds, context, top_role, max_children,
         live_deleg_id, live_writers, live_paths, *origin, overall_start,
         live_home=_live_home, refused=refused,
     )
-    return _run_batch(batch, background)
+    res_str = _run_batch(batch, background)
+    return _postprocess_delegate_result(
+        res_str, preflight_errors, tasks, goal, parent_agent, live_deleg_id, origin,
+    )
 
 
 # ── OpenAI function-calling schema ──────────────────────────────────────────
