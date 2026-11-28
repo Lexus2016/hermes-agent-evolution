@@ -10,6 +10,10 @@
       "name": {
         "description": "The skill name (use skills_list to see available skills). For plugin-provided skills, use the qualified form 'plugin:skill'.",
         "type": "string"
+      },
+      "schema_only": {
+        "description": "OPTIONAL: When true, return only the structured schema (inputs, outputs, required env vars, examples) without the instruction body. Use to check tool requirements cheaply.",
+        "type": "boolean"
       }
     },
     "required": [

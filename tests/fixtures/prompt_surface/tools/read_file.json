@@ -16,8 +16,18 @@
         "type": "integer"
       },
       "path": {
-        "description": "Path to the file to read (absolute, relative, or ~/path)",
-        "type": "string"
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array"
+          }
+        ],
+        "description": "Path to the file to read (absolute, relative, or ~/path), or a list of up to 10 paths for batch reading",
+        "items": {
+          "type": "string"
+        }
       }
     },
     "required": [

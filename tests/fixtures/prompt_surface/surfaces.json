@@ -2,10 +2,10 @@
   "cli-code.claude": {
     "prompt_tokens": {
       "context": 134,
-      "stable": 1829,
-      "volatile": 1268
+      "stable": 2654,
+      "volatile": 1595
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -17,10 +17,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -35,10 +38,10 @@
   "cli.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1225,
-      "volatile": 1268
+      "stable": 2049,
+      "volatile": 1595
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -50,10 +53,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -68,10 +74,10 @@
   "cli.gemini": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1646,
-      "volatile": 1266
+      "stable": 2471,
+      "volatile": 1594
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -83,10 +89,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -101,10 +110,10 @@
   "cli.gpt": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 2420,
-      "volatile": 1264
+      "stable": 3244,
+      "volatile": 1592
     },
-    "tool_tokens": 11398,
+    "tool_tokens": 12837,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -116,10 +125,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -134,10 +146,10 @@
   "cli.hermes": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1225,
-      "volatile": 1268
+      "stable": 2049,
+      "volatile": 1595
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -149,10 +161,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -167,10 +182,10 @@
   "cron.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1211,
-      "volatile": 1268
+      "stable": 2269,
+      "volatile": 1596
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -182,10 +197,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -200,10 +218,10 @@
   "desktop.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1473,
-      "volatile": 1269
+      "stable": 2298,
+      "volatile": 1596
     },
-    "tool_tokens": 11898,
+    "tool_tokens": 13337,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -216,10 +234,13 @@
       "patch",
       "react_to_message",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -234,10 +255,10 @@
   "discord.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1244,
-      "volatile": 1269
+      "stable": 2068,
+      "volatile": 1596
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -249,10 +270,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -267,10 +291,10 @@
   "telegram.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1330,
-      "volatile": 1269
+      "stable": 2155,
+      "volatile": 1597
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 12681,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -282,10 +306,13 @@
       "memory",
       "patch",
       "read_file",
+      "repo_map",
       "search_files",
       "skill_manage",
       "skill_view",
       "skills_list",
+      "team_message",
+      "team_task",
       "terminal",
       "text_to_speech",
       "tool_call",
