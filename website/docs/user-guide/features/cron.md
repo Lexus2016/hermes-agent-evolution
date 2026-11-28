@@ -147,6 +147,18 @@ hermes config set cron.model <model>                              # every unpinn
 
 `hermes cron list` and the `cronjob_manage` tool report `pinned` per job.
 
+### Model drift guard
+
+Because an unpinned job follows the main model, `hermes model` moves the whole cron fleet with it. Two keys under `cron:` decide what an unpinned job does when the global model or provider changed since it was created:
+
+```yaml
+cron:
+  model_drift_guard: true        # Skip an unpinned drifted job instead of running it (default)
+  model_drift_auto_repin: false  # Re-pin it to the new baseline instead of skipping
+```
+
+With `model_drift_guard` on (the default) the job is **skipped** when it comes due: the run records `last_status=drift_skip`, one alert names the axis that moved (`provider 'x' -> 'y'`, `model 'a' -> 'b'`) and the fix (`hermes cron edit <job_id> --provider ... --model ...` to pin, `hermes cron repin <job_id>` to follow the new config), and no inference call is made. `model_drift_auto_repin: true` is the opt-in companion: the job is re-pinned to the new baseline (snapshots refreshed, drift alert cleared) and runs on schedule. Only the literal boolean `true` enables the repin and only the literal boolean `false` disables the guard — anything else stays fail-closed. A `cron.model` / `cron.model_provider` fleet default covers its axis, so it never counts as drift. With the guard off the job runs and simply follows the new global assignment.
+
 ## Skill-backed cron jobs
 
 A cron job can load one or more skills before it runs the prompt. Each skill loads exactly as it does from `/skill-name` in a chat session, including the `[Skill config ...]` block with its resolved `metadata.hermes.config` values from `config.yaml`.

@@ -889,8 +889,12 @@ destructive-verb list misses:
 
 Both go through the normal approval flow like every other dangerous pattern.
 
-Earlier releases bundled the external tirith scanner here. It was removed;
-upgrading drops the `security.tirith_*` settings and enables nothing in its place.
+Before the approval prompt executes a command, the external [Tirith](https://github.com/sheeki03/tirith)
+scanner also runs while `security.tirith_enabled` is on (the default): it flags homograph URLs,
+pipe-to-interpreter payloads and terminal escape injection, and a block or warn joins the approval
+prompt as `tirith:<rule_id>` findings. `security.tirith_path`, `tirith_timeout` and
+`tirith_fail_open` tune the binary, the scan budget and the operational-failure policy — see
+[Security](configuration.md#security).
 
 ### Context File Injection Protection
 

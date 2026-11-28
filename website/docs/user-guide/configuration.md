@@ -1341,6 +1341,7 @@ agent:
                                # "unlimited"/"inf"/"infinity"/"infinite"/0/-1 = no limit
   budget_warning_ratio: null   # Optional one-time checkpoint warning, e.g. 0.75
   api_max_retries: 3           # Retries per provider before fallback engages (default: 3)
+  cron_api_max_retries: 15     # Retry ceiling for cron/unattended runs (never below api_max_retries)
   auto_recovery_cycles: 5      # Wait-and-retry cycles after retries + fallback are spent on an outage (0 = off)
 ```
 
@@ -1349,6 +1350,8 @@ agent:
 `agent.budget_warning_ratio` is off by default for ordinary and delegated conversations. When set to a value strictly between `0` and `1` alongside a finite `max_turns`, Hermes appends one model-visible checkpoint notice to the latest tool result after the threshold is reached. The notice rearms each conversation turn and uses each agent's own iteration budget. It only appends to a current tool-result tail, never an older turn, and does not add a synthetic user/system message or change the existing exhaustion grace call. Dispatcher-owned Kanban workers receive a completion checkpoint at 90% by default (an explicit ratio changes that threshold), while their tools are still available. The checkpoint asks for verified completion or a durable progress comment, not premature success.
 
 `agent.api_max_retries` controls how many times Hermes retries a provider API call on transient errors (rate limits, connection drops, 5xx) **before** fallback-provider switching engages. The default is `3` — four attempts total. If you have [fallback providers](./features/fallback-providers.md) configured and want to fail over faster, drop this to `0` so the first transient error on your primary immediately hands off to the fallback instead of churning retries against the flaky endpoint.
+
+Cron and other unattended runs raise that ceiling: `agent.cron_api_max_retries` (default `15`) applies when the agent runs for `platform="cron"`, so a brief 429/overload spike does not end a scheduled run with nobody watching. It only raises the budget — a larger `api_max_retries` is kept, and interactive sessions are unaffected.
 
 A rate limit that names its reset (`Retry-After` or a `retry_after` body field) is waited out, capped at 600 s per retry. The live status line shows the wait and, when the provider names it, when the limit resets. One exception: on the free Nous tier (no sign-in), a session someone is watching (the Desktop app, the TUI, the `hermes` terminal chat, an ACP editor) does not sit through a cooldown longer than 60 s, because the free tier's pause covers the whole service and a retry before the reset only meets the same refusal. The turn ends at once and says when the limit lifts; a configured fallback runs first. Unattended runs (`hermes chat -q`, cron, messaging platforms, delegated subagents) keep waiting.
 
@@ -2904,6 +2907,17 @@ code_execution:
 
 Environment scrubbing (strips `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_CREDENTIAL`, `*_PASSWD`, `*_AUTH`) and the tool whitelist apply identically in both modes — switching mode does not change the security posture.
 
+## Patch Tool Self-Correction
+
+`patch` tracks consecutive failures per file, so a model that keeps missing the same edit is told to change strategy instead of retrying the same broken patch:
+
+```yaml
+patch:
+  self_correction_retries: 3   # Consecutive failures on one file before the error is permanent (1-5, default 3)
+```
+
+At the threshold (default `3`) the failure is escalated as a permanent failure with a hint to stop retrying; the next failure refuses the patch outright with `PATCH REFUSED`, the closest matching file content, and a pointer to `read_file`/`write_file`. A successful patch of that file clears its counter. Values outside `1`-`5` are ignored and the default applies, and the value is read once per process. The syntax/lint check that follows `write_file` and `patch` is not configurable — it always runs for linted languages and reports only the errors the write introduced.
+
 ## Web Search Backends
 
 The `web_search` and `web_extract` tools support five backend providers. Configure the backend in `config.yaml` or via `hermes tools`:
@@ -3057,6 +3071,10 @@ Secret redaction and the website blocklist:
 ```yaml
 security:
   redact_secrets: true           # Redact API key patterns in tool output and logs (on by default)
+  tirith_enabled: true           # Scan commands with the Tirith content scanner before they run
+  tirith_path: tirith            # Scanner binary; a bare name missing from PATH is fetched into $HERMES_HOME/bin
+  tirith_timeout: 5              # Seconds one scan may take before the failure policy applies
+  tirith_fail_open: true         # true: an operational scan failure allows; false: it blocks
   website_blocklist:             # See Website Blocklist section below
     enabled: false
     domains: []
@@ -3065,7 +3083,12 @@ security:
 
 - `redact_secrets` — when `true`, automatically detects and redacts patterns that look like API keys, tokens, and passwords in tool output before it enters the conversation context and logs. **On by default**. Set to `false` explicitly only when you need raw credential-like strings for debugging or redactor development. Reading a secret-bearing file (`.env`-style files, shell rc/profile files, the Hermes `config.yaml` under `HERMES_HOME` and its `backups/config/` copies) with `read_file`, `search_files` or a terminal `cat`/`grep` also masks credential-shaped assignments (`SOME_API_TOKEN: …`) with a non-reusable `«redacted-secret»` marker, whatever the value looks like; ordinary source and project config files keep only the vendor-prefix patterns so fixtures such as `MAX_TOKENS: 100` are never mangled.
 
-Earlier releases also had `tirith_*` keys for a bundled command scanner; it was removed and upgrading drops those keys. Content-level command checks are described in [Content-Level Command Checks](security.md#content-level-command-checks).
+- `tirith_enabled` (default `true`) — scan a command with the [Tirith](https://github.com/sheeki03/tirith) content scanner before the approval flow executes it. The scanner looks for content-level threats a pattern list cannot see: homograph URLs, pipe-to-interpreter payloads, terminal escape injection. Its exit code is the verdict (`0` allow, `1` block, `2` warn) and JSON findings only enrich the message; a block or warn enters the normal approval prompt tagged with `tirith:<rule_id>` keys. When `tirith_path` is a bare name that is not on `PATH`, Hermes fetches the pinned release into `$HERMES_HOME/bin/tirith` on first use (SHA-256 always verified, cosign provenance checked when `cosign` is installed) — point `tirith_path` at your own build to skip the download, or set `tirith_enabled: false` to skip scanning.
+- `tirith_timeout` (default `5`) — seconds one scan may take. Exceeding it is an operational failure, not a verdict.
+- `tirith_fail_open` (default `true`) — what an operational failure (spawn error, timeout, unknown exit code) means: `true` allows the command, `false` refuses it. A **security configuration that cannot be read** is never treated as an operational failure — the command is refused with `failure_class=configuration_error`, and nothing is approved until the config is repaired.
+- `TIRITH_ENABLED`, `TIRITH_FAIL_OPEN`, `TIRITH_BIN` and `TIRITH_TIMEOUT` override these keys.
+
+Content-level checks that do not need an external binary are described in [Content-Level Command Checks](security.md#content-level-command-checks).
 
 ## Website Blocklist
 
@@ -3274,6 +3297,18 @@ terminal:
 ```
 
 `MESSAGING_CWD` and direct `TERMINAL_CWD` entries in `~/.hermes/.env` are legacy compatibility fallbacks. New configurations should use `terminal.cwd`.
+
+## Debug Request Dumps
+
+`HERMES_DUMP_REQUESTS=true` writes the exact provider request to `~/.hermes/logs/request_dump_<session>_<timestamp>.json` — once per API call on the preflight path, and on a non-retryable client error or an exhausted retry ladder on the error path. Secrets are redacted before the file is written. Two keys stop a retry loop from saving the same multi-hundred-KB payload over and over:
+
+```yaml
+request_dump:
+  dedup_window_seconds: 60    # Do not re-dump an identical request body inside this window
+  max_dumps_per_session: 8    # Cap preflight dumps per session (0 = no cap)
+```
+
+`request_dump.dedup_window_seconds` suppresses a repeat dump of an identical request body (same session, reason and body hash) inside the window; the preflight call site fires on every API call, so a burst of identical attempts would otherwise write one full snapshot per call. `request_dump.max_dumps_per_session` caps how many **preflight** dumps one session may write, and a suppressed duplicate does not consume the budget. The error path is never capped, because that dump is the one a post-mortem needs. Dumps contain the full prompt — treat the files like the conversation itself.
 
 ## Telemetry (OpenTelemetry tracing)
 
