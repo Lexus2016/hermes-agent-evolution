@@ -387,7 +387,7 @@ def _write_cron_jobs(tmp_path, jobs):
 class TestCronModelChangeNotice:
     """A global model change tells the operator which unpinned jobs stay on their snapshot."""
 
-    def test_notice_says_jobs_keep_running_and_names_the_user_owned_pin_path(
+    def test_notice_says_jobs_are_skipped_and_names_the_pin_and_repin_paths(
         self,
         _isolated_hermes_home,
         capsys,
@@ -407,8 +407,9 @@ class TestCronModelChangeNotice:
         set_config_value("model.default", "new-model")
 
         notice = capsys.readouterr().out
-        assert "keeps running" in notice
-        assert "fail closed" not in notice
+        assert "will be skipped at the next run" in notice
+        assert "cron.model_drift_guard" in notice
+        assert "hermes cron repin <job_id>" in notice
         assert "hermes cron edit <job_id> --provider <provider> --model <model>" in notice
         assert "cronjob action=update" not in notice
 

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 from contextlib import contextmanager, suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -3102,12 +3103,13 @@ def warn_unpinned_cron_jobs_after_model_config_change(
     if affected <= 0:
         return
 
-    noun, verb = ("job", "keeps") if affected == 1 else ("jobs", "keep")
+    noun = "job" if affected == 1 else "jobs"
     print(
-        f"ℹ️  {affected} unpinned cron {noun} {verb} running on the {axis} it was created under "
-        f"(its {axis}_snapshot), not the new global {axis}. To move it, pin it with "
-        "`hermes cron edit <job_id> --provider <provider> --model <model>` or set a fleet default "
-        "with `hermes config set cron.model <model>`.")
+        f"ℹ️  {affected} unpinned cron {noun} will be skipped at the next run: the global "
+        f"{axis} changed and the drift guard (cron.model_drift_guard) fails closed on unpinned "
+        "jobs. To follow the new config: `hermes cron repin <job_id>` (or `hermes cron repin --all`). "
+        "To pin: `hermes cron edit <job_id> --provider <provider> --model <model>`. To turn the "
+        "guard off: `hermes config set cron.model_drift_guard false`.")
 
 
 def _default_value_for_key(dotted_key: str):
