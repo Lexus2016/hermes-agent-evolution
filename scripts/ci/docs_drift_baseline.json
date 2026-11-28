@@ -24,8 +24,6 @@
   "context.memory_trim.enabled",
   "context.memory_trim.info_log_min_delta_mb",
   "context.memory_trim.log_every_n",
-  "cron.delegation_drain_seconds",
-  "cron.inactivity_timeout_seconds",
   "cron.output_retention",
   "cron.session_db_timeout_seconds",
   "dashboard.compute_host_heartbeat_secs",

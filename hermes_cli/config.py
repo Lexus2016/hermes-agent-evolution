@@ -2997,8 +2997,8 @@ def resolve_cron_model_drift_defaults(
 def cron_model_drift_axes(
     job: Any, *, current_provider: Any = "", current_model: Any = "", config: Any = None
 ) -> List[str]:
-    """Return the unpinned axes on which *job* will keep running on its creation snapshot rather
-    than the new global assignment (the scheduler treats the snapshot as the effective pin)."""
+    """Return the unpinned axes on which *job* has drifted from the live global assignment.
+    With ``cron.model_drift_guard`` on the scheduler skips such a job instead of running it."""
     if not isinstance(job, dict) or not cron_model_drift_guard_enabled(config):
         return []
 
@@ -3045,8 +3045,8 @@ def _cron_model_impact_result(available: bool) -> Dict[str, Any]:
 def build_cron_model_impact(
     *, current_provider: Any = "", current_model: Any = "", config: Any = None, jobs: Any = None
 ) -> Dict[str, Any]:
-    """Build a bounded, profile-local summary of unpinned jobs that stay on their creation snapshot
-    after a global model/provider change. Job-store inspection is best effort: the model assignment
+    """Build a bounded, profile-local summary of unpinned jobs the drift guard will skip after a
+    global model/provider change. Job-store inspection is best effort: the model assignment
     has already succeeded when Desktop requests this, so an unreadable store is reported as
     unavailable rather than failing."""
     if jobs is None:

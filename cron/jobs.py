@@ -34,7 +34,7 @@ from pathlib import Path
 from agent.deadline import poll_until
 from hermes_constants import get_hermes_home
 from cron.constants import CLAIM_TTL_INACTIVITY_HEADROOM, FIRE_CLAIM_SKEW_SECONDS, FIRE_CLAIM_TTL_SECONDS
-from cron.env_settings import cron_env_setting
+from cron.env_settings import cron_seconds_setting
 from cron.jobs_invariants import _validate_job_mode_invariants, validate_schedule_knobs
 from cron.jobs_model_pin import _main_model_pin
 from cron import jobs_time
@@ -284,17 +284,17 @@ ONESHOT_RUN_CLAIM_TTL_SECONDS = 1800
 # Derived TTL = inactivity timeout × CLAIM_TTL_INACTIVITY_HEADROOM (cron/constants.py). The TTL
 # only recovers a claim left by a tick that DIED mid-run.
 
-_DEFAULT_CRON_INACTIVITY_TIMEOUT = 600.0
+_DEFAULT_CRON_INACTIVITY_TIMEOUT = 900.0
 
 
 def _oneshot_run_claim_ttl_seconds() -> float:
-    """One-shot running-claim TTL from ``HERMES_CRON_TIMEOUT``: unset/invalid → 600s → 1800s;
-    ``0`` (unlimited) → the fixed floor; positive N → ``max(N * headroom, floor)``."""
-    raw = cron_env_setting("HERMES_CRON_TIMEOUT").strip()
-    try:
-        timeout = float(raw) if raw else _DEFAULT_CRON_INACTIVITY_TIMEOUT
-    except (ValueError, TypeError):
-        timeout = _DEFAULT_CRON_INACTIVITY_TIMEOUT
+    """One-shot running-claim TTL from the cron inactivity limit
+    (``HERMES_CRON_TIMEOUT`` then ``cron.inactivity_timeout_seconds``, default 900):
+    ``0`` (unlimited) → the fixed floor; positive N → ``max(N * headroom, floor)``.
+    Same resolution as the scheduler watchdog, so a live run's claim can never expire while it
+    is still inside its inactivity budget."""
+    timeout = cron_seconds_setting(
+        "HERMES_CRON_TIMEOUT", "inactivity_timeout_seconds", _DEFAULT_CRON_INACTIVITY_TIMEOUT)
     if timeout <= 0:
         return float(ONESHOT_RUN_CLAIM_TTL_SECONDS)
     return max(timeout * CLAIM_TTL_INACTIVITY_HEADROOM, float(ONESHOT_RUN_CLAIM_TTL_SECONDS))

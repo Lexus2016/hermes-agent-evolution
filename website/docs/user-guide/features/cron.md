@@ -159,6 +159,20 @@ cron:
 
 With `model_drift_guard` on (the default) the job is **skipped** when it comes due: the run records `last_status=drift_skip`, one alert names the axis that moved (`provider 'x' -> 'y'`, `model 'a' -> 'b'`) and the fix (`hermes cron edit <job_id> --provider ... --model ...` to pin, `hermes cron repin <job_id>` to follow the new config), and no inference call is made. `model_drift_auto_repin: true` is the opt-in companion: the job is re-pinned to the new baseline (snapshots refreshed, drift alert cleared) and runs on schedule. Only the literal boolean `true` enables the repin and only the literal boolean `false` disables the guard — anything else stays fail-closed. A `cron.model` / `cron.model_provider` fleet default covers its axis, so it never counts as drift. With the guard off the job runs and simply follows the new global assignment.
 
+### Inactivity timeout and background-delegation drain
+
+A cron agent may run for hours while it keeps calling tools, but a hung API call or a stuck tool must not hold the scheduler forever. Two keys under `cron:` bound a run:
+
+```yaml
+cron:
+  inactivity_timeout_seconds: 900    # 0 = no inactivity watchdog
+  delegation_drain_seconds: 1200     # 0 = do not wait for background subagents
+```
+
+`inactivity_timeout_seconds` is the longest the agent may go **without activity** before the run is interrupted and reported as failed with the last activity in the error. It is not a wall-clock limit. `HERMES_CRON_TIMEOUT` overrides it for one host; when neither is set the default is 900 seconds and `0` disables the watchdog.
+
+`delegation_drain_seconds` is how long cron waits, after the agent's turn returns, for subagents started with `delegate_task(background=true)` to finish before it interrupts them and ends the session. Without that wait their completion events and artifacts are lost. `0` restores the old teardown that never waits. `HERMES_CRON_DELEGATION_DRAIN_SECONDS` overrides it.
+
 ## Skill-backed cron jobs
 
 A cron job can load one or more skills before it runs the prompt. Each skill loads exactly as it does from `/skill-name` in a chat session, including the `[Skill config ...]` block with its resolved `metadata.hermes.config` values from `config.yaml`.

@@ -54,7 +54,7 @@ if str(_checkout_root) not in sys.path:
 from cron.worker_bootstrap import WORKER_MARKER, finish_worker_boot
 from hermes_constants import get_hermes_home, hermes_home_key
 from hermes_cli.observability.shared_metrics_gateway import note_cron_execution, note_cron_skipped
-from cron.env_settings import cron_env_setting
+from cron.env_settings import cron_env_setting, cron_seconds_setting
 from hermes_cli._subprocess_compat import windows_hide_flags
 from hermes_cli.config import (
     load_config, load_config_readonly)
@@ -1735,18 +1735,50 @@ def _consume_interrupted_flag(job_id: str, token: Optional[object] = None) -> bo
         return hit
 
 
+_DEFAULT_CRON_INACTIVITY_SECONDS = 900.0
+
+
 def _cron_inactivity_seconds() -> float:
-    """Parse HERMES_CRON_TIMEOUT (seconds). 0 = unlimited; bad input = 600. Shared by the
-    inactivity monitor and the cwd-lock bound so they can't drift: the lock bound must stay >= the
+    """Inactivity limit for one cron agent run: ``HERMES_CRON_TIMEOUT`` wins over
+    ``cron.inactivity_timeout_seconds`` (default 900). 0 = unlimited. Shared by the inactivity
+    monitor and the cwd-lock bound so they can't drift: the lock bound must stay >= the
     inactivity limit or waiters fail while a healthy holder runs."""
-    raw = cron_env_setting("HERMES_CRON_TIMEOUT").strip()
-    if not raw:
-        return 600.0
+    return cron_seconds_setting(
+        "HERMES_CRON_TIMEOUT", "inactivity_timeout_seconds", _DEFAULT_CRON_INACTIVITY_SECONDS)
+
+
+def _cron_delegation_drain_seconds() -> float:
+    """Background-delegation drain budget: ``HERMES_CRON_DELEGATION_DRAIN_SECONDS`` wins over
+    ``cron.delegation_drain_seconds`` (default 1200). 0 disables the drain."""
+    return cron_seconds_setting(
+        "HERMES_CRON_DELEGATION_DRAIN_SECONDS", "delegation_drain_seconds", 1200.0)
+
+
+def _drain_cron_delegations(cron_session_id: str, job_name: str) -> None:
+    """Wait for the run's background delegations before the cron session tears down (#1200).
+
+    ``delegate_task(background=true)`` children run on a daemon executor, so without this barrier
+    the session ends while they are still running and their completion events and artifacts are
+    orphaned. A missing registry or a failing poll must never fail a run that already completed.
+    """
+    if not cron_session_id:
+        return
+    deadline = _cron_delegation_drain_seconds()
+    if deadline <= 0:
+        return
     try:
-        return float(raw)
-    except (ValueError, TypeError):
-        logger.warning("Invalid HERMES_CRON_TIMEOUT=%r; using default 600s", raw)
-        return 600.0
+        from tools.async_delegation import wait_for_session_delegations
+
+        outcome = wait_for_session_delegations(cron_session_id, deadline_seconds=deadline)
+    except Exception:
+        logger.debug("Job '%s': background-delegation drain failed", job_name, exc_info=True)
+        return
+    if outcome.get("waited"):
+        logger.info(
+            "Job '%s': drained %s background delegation(s) for session %s "
+            "(%s completed, %s interrupted, timed_out=%s)",
+            job_name, outcome.get("waited"), cron_session_id,
+            outcome.get("completed"), outcome.get("interrupted"), outcome.get("timed_out"))
 
 
 def _get_parallel_pool(max_workers: Optional[int]) -> concurrent.futures.ThreadPoolExecutor:
@@ -2206,23 +2238,6 @@ def _auto_repin_drifted_job(job_id: str, changes: str) -> bool:
     return True
 
 
-def _snapshot_pin(job: dict, axis: str, current: str, job_id: str) -> str:
-    """The creation snapshot is an unpinned axis's effective pin: return it, logging once when it
-    differs from *current* (the live global default); ``""`` for legacy jobs without one, which keep
-    following the global default. A global model/provider change must never stop a cron job; a job
-    keeps running on what it was created under until the operator pins it or sets a cron.* fleet
-    default (#44585)."""
-    snapshot = str(job.get(f"{axis}_snapshot") or "").strip()
-    if snapshot and current and snapshot.lower() != current.lower():
-        logger.info(
-            "Job '%s': running on creation-snapshot %s %r (global default is now %r); "
-            "`hermes cron resnap %s` adopts the new default (stays unpinned), "
-            "`hermes cron edit %s --%s <value>` or cron.%s in config.yaml pins it.",
-            job_id, axis, snapshot, current, job_id, job_id, axis,
-            "model" if axis == "model" else "model_provider")
-    return snapshot
-
-
 def _load_cron_job_config(job: dict, job_id: str, job_name: str) -> _CronJobConfig:
     """Load config.yaml and resolve the run's model: per-job pin > cron.model (fleet default) >
     the main agent model (config ``model:``, then HERMES_MODEL) > the claimed welcome trial's. Re-read
@@ -2582,10 +2597,12 @@ def _raise_inactivity_timeout(agent, job_name: str, limit_s: float) -> None:
 
 def _run_agent_with_watchdog(
     agent, prompt: str, job: dict, job_id: str, job_name: str, task_id: str, cancel_event,
-    worker_state: Optional[dict] = None,
+    worker_state: Optional[dict] = None, cron_session_id: str = "",
 ) -> dict:
     """Run ``agent.run_conversation`` on a worker thread under the inactivity (not wall-clock)
-    watchdog: default 600s, override HERMES_CRON_TIMEOUT, 0 = unlimited."""
+    watchdog: ``cron.inactivity_timeout_seconds`` (default 900) overridden by
+    ``HERMES_CRON_TIMEOUT``; 0 = unlimited. Drains that run's background delegations before
+    returning or raising, so a cron session never orphans subagent work (#1200)."""
     _cron_timeout = _cron_inactivity_seconds()
     _cron_inactivity_limit = _cron_timeout if _cron_timeout > 0 else None
     _POLL_INTERVAL = 5.0
@@ -2708,6 +2725,8 @@ def _run_agent_with_watchdog(
     finally:
         _watch_stop.set()
         _cron_pool.shutdown(wait=False, cancel_futures=True)
+        # Drain after the turn ends (or is abandoned) but before finalize/teardown (#1200).
+        _drain_cron_delegations(cron_session_id, job_name)
 
     if _inactivity_timeout:
         _raise_inactivity_timeout(agent, job_name, _cron_inactivity_limit)
@@ -3547,7 +3566,7 @@ def _run_job_impl(
 
         result = _run_agent_with_watchdog(
             agent, prompt, job, job_id, job_name, scope.task_id, cancel_event,
-            worker_state=_worker_state)
+            worker_state=_worker_state, cron_session_id=_cron_session_id)
         # #701: carry this run's tool-call count to the terminal booking so the job
         # record can tell a legitimately idle stage from a silently no-op'd one.
         job["_last_run_tool_calls"] = _count_tool_calls(result.get("messages"))
