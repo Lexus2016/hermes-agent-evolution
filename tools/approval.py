@@ -516,12 +516,17 @@ def load_permanent(patterns: set):
 
 
 def _persist_choice(session_key: str, choice: str, keys: list[str]) -> None:
-    """Persist a human ``session``/``always`` choice for each pattern key. ``once`` persists nothing."""
+    """Persist a human ``session``/``always`` choice for each pattern key. ``once`` persists nothing.
+
+    A Tirith scanner verdict is never granted permanently: the scanner's policy file is how that
+    rule changes, so an ``always`` answer to a ``tirith:<rule_id>`` finding is kept for the session
+    only (the human gate never offers a permanent allow for one either).
+    """
     for key in keys:
         if choice not in ("session", "always"):
             continue
         approve_session(session_key, key)
-        if choice == "always":
+        if choice == "always" and not str(key).startswith("tirith:"):
             approve_permanent(key)
             # Pass only this process's grants, taken against the baseline of the same snapshot. A
             # check that syncs a hand removal before the save runs advances the baseline, so a
