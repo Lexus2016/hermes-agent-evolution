@@ -92,6 +92,10 @@ def _pin_environment() -> None:
     # The toolchain probe line reports the host's python/node/pip; it is environment, not code.
     from tools import env_probe
     env_probe.get_environment_probe_line = lambda **_k: ""  # type: ignore[assignment]
+    # The PEP 668 install hint embeds ``sys.executable`` (and the uv ``--python=`` flag), a machine
+    # path: it appears only where the base interpreter is externally managed, so it moved bytes.
+    from tools import python_install
+    python_install.get_install_hint = lambda: ""  # type: ignore[assignment]
 
 
 class _ImportFailures(logging.Handler):
