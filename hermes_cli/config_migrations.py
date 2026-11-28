@@ -767,6 +767,16 @@ def _migrate_to_49(results: dict[str, Any], quiet: bool) -> None:
             print("  ✓ Cleared TERMINAL_VERCEL_RUNTIME from .env (was the old default; the image is used instead)")
 
 
+def _migrate_to_42(results: dict[str, Any], quiet: bool) -> None:
+    """Reserve upstream's version without retiring this fork's active drift guard.
+
+    Upstream lets an unpinned job run on its creation snapshot, so it dropped the toggle;
+    this fork still fails closed on drift (#44585) and answers ``cron.model_drift_guard``,
+    so an explicit true/false must not be erased by the upgrade.
+    """
+    return
+
+
 def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
     """Reserve upstream's version without retiring this fork's active scanner policy.
 
@@ -856,16 +866,9 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
         message="  ✓ Model catalog now refreshes every 20 minutes (model_catalog.ttl_minutes)",
         extra_guard=lambda raw: "ttl_minutes" not in raw)),
     (41, _migrate_to_41),
-    # 41 → 42: cron.model_drift_guard is gone. Unpinned jobs now run on their creation snapshot
-    # instead of failing closed when the global model changes, so the toggle has nothing to gate.
-    (42, functools.partial(
-        _rewrite_key, section="cron", key="model_drift_guard", new=None,
-        match=lambda cur: cur is not None,
-        added="removed cron.model_drift_guard",
-        message=(
-            "  ✓ Removed cron.model_drift_guard — unpinned cron jobs now keep running on the "
-            "model/provider they were created under when the global default changes, instead "
-            "of being skipped. Pin a job or set cron.model to move it."))),
+    # 41 → 42: reserve upstream's version; this fork keeps the #44585 drift guard, so an
+    # explicit cron.model_drift_guard choice must survive (see _migrate_to_42).
+    (42, _migrate_to_42),
     # 42 → 43: gateway.multiplex_profile_allowlist is gone. A multiplexing default gateway serves
     # every live profile under profiles/; a profile that must not be served is archived or deleted.
     (43, functools.partial(
@@ -908,7 +911,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (48, _migrate_to_48),
     # 48 → 49: the seeded Vercel runtime pin is dropped so fresh sandboxes use the managed image (see _migrate_to_49).
     (49, _migrate_to_49),
-    # 49 → 50: security.tirith_* dropped; the bundled scanner is gone (see _migrate_to_50).
+    # 49 → 50: reserve upstream's version; this fork keeps the Tirith scanner (see _migrate_to_50).
     (50, _migrate_to_50),
     # 50 → 51: cron.bot_chat_delivery_timeout_seconds is gone with the local `hermes chat`
     # fallback lane it bounded. Bot Chat deliveries are admitted to the running gateway and
