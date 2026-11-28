@@ -2769,7 +2769,6 @@ DEFAULT_CONFIG = {
     # (re-read the file, use write_file, etc.).  1–5; default 3.
     "patch": {
         "self_correction_retries": 3,
-        "lint_after_patch": True,
     },
 
     "local_runtime": {
