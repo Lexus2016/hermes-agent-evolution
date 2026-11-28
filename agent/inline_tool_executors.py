@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+from agent.prompt_cache_scope import conversation_id
 from tools.arg_coercion import coerce_tool_args
 
 
@@ -28,6 +29,7 @@ def tool_hook_ids(agent, effective_task_id: str, tool_call_id: Optional[str]) ->
         "tool_call_id": tool_call_id or "",
         "turn_id": getattr(agent, "_current_turn_id", "") or "",
         "api_request_id": getattr(agent, "_current_api_request_id", "") or "",
+        "conversation_id": conversation_id(agent),
     }
 
 
@@ -99,6 +101,14 @@ class InlineToolContext:
 
 InlineToolExecutor = Callable[[Any, dict, InlineToolContext], Any]
 
+# Refusals the memory store answers with: malformed args, a disabled store, or a
+# gate that staged / blocked the write. None of them means the backend is down, so
+# none of them may open the memory circuit breaker (#977).
+_MEMORY_REFUSAL_CLASSES = frozenset({
+    "invalid_args", "disabled", "missing_content", "missing_old_text",
+    "scan_blocked", "would_empty", "over_budget", "gate_refused", "staged",
+})
+
 # ``(kwarg, args_key)`` → ``args.get(key)``; ``(kwarg, args_key, default)`` → ``args.get(key, default)``.
 _ArgSpec = tuple[Any, ...]
 
@@ -132,7 +142,7 @@ def _session_search(agent, args: dict, ctx: InlineToolContext) -> Any:
     return _call_tool(
         "tools.session_search_tool", "session_search", args,
         (
-            ("query", "query", ""), ("role_filter", "role_filter"), ("limit", "limit", 3),
+            ("query", "query", ""), ("role_filter", "role_filter"), ("limit", "limit"),
             ("session_id", "session_id"), ("around_message_id", "around_message_id"),
             ("window", "window", 5), ("sort", "sort"), ("profile", "profile"),
             ("detail", "detail", "adaptive"), ("after", "after"), ("before", "before"),
@@ -180,6 +190,8 @@ def _memory(agent, args: dict, ctx: InlineToolContext) -> Any:
         _ok = True
     if _ok:
         _mem_breaker.record_success()
+    elif isinstance(_parsed, dict) and _parsed.get("failure_class") in _MEMORY_REFUSAL_CLASSES:
+        pass  # the store answered; do not count a refused call as a backend failure
     else:
         _mem_breaker.record_failure()
         if _mem_breaker.should_trip():
@@ -215,6 +227,42 @@ def _desktop_preview(agent, args: dict, ctx: InlineToolContext) -> Any:
     from tools.preview_tool import _handle_preview
 
     return _handle_preview(args)
+
+
+def _preview_is_default_vault_target(agent, task_id: str) -> bool:
+    """An omitted ``browser_vault`` target means the in-app browser when this session can drive it (its
+    ``drive_preview``, eager or deferred behind ``tool_call``) and has no managed browser page of its own:
+    a Desktop agent that opened a page with browser_exec keeps filling that page."""
+    names = getattr(agent, "valid_tool_names", ()) or ()
+    preview = "drive_preview" in names
+    if not preview and "tool_call" in names:
+        from agent.tool_executor import _tool_search_scoped_names
+
+        preview = "drive_preview" in _tool_search_scoped_names(agent)
+    if not preview:
+        return False
+    from agent.browser_page_registry import backend_for_task
+    from tools.browser_session import session_for_task
+    from tools.browser_supervisor import SUPERVISOR_REGISTRY
+
+    # A plugin backend (e.g. Camofox) holding the task's live page owns the fill: browser_vault's own
+    # backend selection already picks it, so an omitted target must NOT be forced to preview over it.
+    # Fall to preview only when nothing else owns the page.
+    return (not session_for_task(task_id) and SUPERVISOR_REGISTRY.get(task_id) is None
+            and backend_for_task(task_id) is None)
+
+
+def _browser_vault(agent, args: dict, ctx: InlineToolContext) -> Any:
+    # The preview transport is the agent's GUI callback, which registry dispatch never forwards.
+    import tools.browser_vault_tool  # registers the real handler
+    from tools.registry import registry
+
+    task_id = ctx.effective_task_id or "default"
+    if "target" not in args and (args.get("action") in ("fill", "save_login", "enter_code")
+                                 and _preview_is_default_vault_target(agent, task_id)):
+        args = {**args, "target": "preview"}
+    return registry.dispatch("browser_vault", args, task_id=ctx.effective_task_id,
+                             preview_callback=getattr(agent, "drive_preview_callback", None))
 
 
 def _manage_connections(agent, args: dict, ctx: InlineToolContext) -> Any:
@@ -298,6 +346,8 @@ _RAW_INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
     # Chat session carries the schema, and the tool re-gates on the title.
     "message_agent": _tool(
         "tools.bot_mode_dm", "message_agent_tool", ("target", "target", ""), ("message", "message", ""),
+        ("expects_reply", "expects_reply", True), ("cancel", "cancel", ""),
+        ("constraints", "constraints", ""), ("expecting", "expecting", ""),
         task_id=lambda agent, ctx: ctx.effective_task_id, agent=lambda agent, ctx: agent,
     ),
     "session_search": _session_search,
@@ -311,6 +361,7 @@ _RAW_INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
         ("start_line", "start_line"), ("count", "count"),
     ),
     "desktop_preview": _desktop_preview,
+    "browser_vault": _browser_vault,
     "drive_preview": _callback_tool(
         "tools.drive_preview_tool", "drive_preview_tool", "drive_preview_callback",
         ("action", "action", ""), ("ref", "ref"), ("selector", "selector"), ("text", "text"),
@@ -372,7 +423,10 @@ def resolve_invoke_tool_executor(agent, function_name: str) -> Optional[InlineTo
         return INLINE_TOOL_EXECUTORS[function_name]
     memory_manager = agent._memory_manager
     if memory_manager and memory_manager.has_tool(function_name):
-        return lambda agent, args, ctx: agent._memory_manager.handle_tool_call(function_name, args)
+        return lambda agent, args, ctx: agent._memory_manager.handle_tool_call(
+            function_name, args,
+            caller_gsk=(getattr(agent, "_gateway_session_key", "") or ""),
+        )
     if function_name == "message_agent":
         return None
     return INLINE_TOOL_EXECUTORS.get(function_name)

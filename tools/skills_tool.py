@@ -4,11 +4,12 @@ holding SKILL.md (YAML frontmatter + instructions) plus optional references/, te
 scripts/. `skills_list` returns name/description only; `skill_view` returns full content and
 linked files. Sibling modules (skills_tool_setup / _plugin / _dedup) re-export here."""
 
+import contextvars
 import json
 import logging
 import os
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,18 +25,20 @@ from tools.skills_tool_plugin import (
     MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH, _INJECTION_PATTERNS, _fail, _json,
     _mark_background_review_read, _preprocess_skill, _read_skill_text, _safe_frontmatter,
     _serve_plugin_skill, _serve_skill_file, _truncate_description)
-from tools.skills_tool_dedup import (
-    _check_skill_view_dedup, _record_skill_view, reset_skill_view_dedup)
+from tools.skills_tool_dedup import dedup_skill_view, reset_skill_view_dedup
 from tools.skill_provenance import is_background_review
 
 logger = logging.getLogger(__name__)
 
 # Per-session discovery cache: {cache_key: (signature, timestamp, skills_list)}. Signature =
-# per-dir max mtime of the dir and its immediate children (add/remove inside a category does
-# NOT bump the root mtime) + the disabled set (config-only change, no mtime) + platform; the
-# TTL bounds staleness from in-place SKILL.md edits, which no directory signature can see.
+# every catalog directory's mtime and child-dir names, walked like the catalog itself (an install
+# under an existing category such as ``mlops/training/`` moves only that dir's mtime) + the disabled
+# set (config-only change, no mtime) + platform; the TTL bounds staleness from in-place SKILL.md
+# edits, which no directory signature can see.
 _SKILLS_CACHE: dict = {}
 _SKILLS_CACHE_TTL_SECONDS = 30.0
+# Deepest directory the signature descends to below a root (a skill sits at <cat>/<sub>/<skill>/).
+_SIGNATURE_MAX_DEPTH = 6
 
 
 def clear_skills_cache() -> None:
@@ -43,23 +46,42 @@ def clear_skills_cache() -> None:
     _SKILLS_CACHE.clear()
 
 
+def _dir_tree_signature(root, sig, depth=_SIGNATURE_MAX_DEPTH) -> None:
+    """Append ``(dir, mtime_ns, child dir names)`` for *root* and the dirs below it the catalog walks
+    (``iter_skill_index_files``: no excluded dirs, no support dirs of a skill), depth-bounded. The child
+    names, not only mtimes: an install and an uninstall inside one coarse mtime tick (1-2 s on some
+    filesystems) leave every mtime equal, and the change must still show. ~1 ms for 170 dirs."""
+    from agent.skill_utils import EXCLUDED_SKILL_DIRS, SKILL_SUPPORT_DIRS
+    try:
+        mtime = os.stat(root).st_mtime_ns
+        with os.scandir(root) as it:
+            entries = list(it)
+    except OSError:
+        return
+    names, is_skill = [], False
+    for entry in entries:
+        with suppress(OSError):
+            if entry.is_dir():
+                names.append(entry.name)
+            elif entry.name == "SKILL.md":
+                is_skill = True
+    names.sort()
+    sig.append((str(root), mtime, tuple(names)))
+    if depth <= 0:
+        return
+    for name in names:
+        if name not in EXCLUDED_SKILL_DIRS and not (is_skill and name in SKILL_SUPPORT_DIRS):
+            _dir_tree_signature(os.path.join(root, name), sig, depth - 1)
+
+
 def _skills_scan_signature(dirs_to_scan, disabled) -> tuple:
-    """O(#dirs + #categories) stat-based change signature; platform is read via
+    """Stat-based change signature over every directory the catalog walks; platform is read via
     ``agent.skill_utils.sys`` so test patches are honored."""
     from agent import skill_utils as _skill_utils
     platform = getattr(getattr(_skill_utils, "sys", None), "platform", "")
-    sig = []
+    sig: list = []
     for d in dirs_to_scan:
-        try:
-            m = d.stat().st_mtime
-        except OSError:
-            continue
-        with suppress(OSError), os.scandir(d) as it:
-            for entry in it:
-                with suppress(OSError):
-                    if entry.is_dir(follow_symlinks=False):
-                        m = max(m, entry.stat(follow_symlinks=False).st_mtime)
-        sig.append((str(d), m))
+        _dir_tree_signature(str(d), sig)
     return (tuple(sig), frozenset(disabled), platform)
 
 
@@ -79,7 +101,7 @@ _secret_capture_callback = None
 _LOOKUP_HINT = "Use a skill name or relative path within the skills directory."
 
 
-def _skill_lookup_path_error(name: str) -> Optional[str]:
+def skill_lookup_path_error(name: str) -> Optional[str]:
     """Error if lookup *name* could escape the search roots it is joined onto. Windows drive
     paths are rejected too: their ``:`` would be misread as a plugin namespace separator."""
     from tools.path_security import has_traversal_component
@@ -95,7 +117,12 @@ def _skill_lookup_path_error(name: str) -> Optional[str]:
 
 def load_env() -> dict[str, str]:
     """Snapshot of HERMES_HOME/.env for the post-skill secret-capture diff (same tokenizer that
-    installs the profile scope, so a captured value never differs from the served one)."""
+    installs the profile scope, so a captured value never differs from the served one). A frozen-policy
+    worker never opens the profile ``.env``: ``hermes_cli.config.load_env`` owns that short-circuit."""
+    from agent.safe_worker_policy import worker_config_snapshot
+
+    if worker_config_snapshot() is not None:
+        return {}
     from agent.secret_scope import load_env_file
 
     return load_env_file(get_hermes_home() / ".env")
@@ -104,6 +131,21 @@ def load_env() -> dict[str, str]:
 def set_secret_capture_callback(callback) -> None:
     global _secret_capture_callback
     _secret_capture_callback = callback
+
+
+# A turn-scoped capture callback (the session owner binds one per local-viewer turn): it wins over the
+# process-global slot and over the gateway-surface "unsupported" hint, because that turn's viewer can
+# answer. A ContextVar, so tool worker threads started with ``propagate_context_to_thread`` inherit it.
+_turn_secret_capture = contextvars.ContextVar("turn_secret_capture", default=None)
+
+
+@contextmanager
+def bind_turn_secret_capture(callback):
+    token = _turn_secret_capture.set(callback)
+    try:
+        yield
+    finally:
+        _turn_secret_capture.reset(token)
 
 
 def _skill_utils_delegate(attr: str):
@@ -174,7 +216,7 @@ def _is_skill_disabled(*names: str, platform: str | None = None) -> bool:
         return False
 
 
-def _skill_search_dirs() -> tuple[list[tuple[int, Path]], Path]:
+def skill_search_dirs() -> tuple[list[tuple[int, Path]], Path]:
     """(``(tier, dir)`` roots in precedence order, active_skills_dir) — the shared
     ``agent.skill_utils.get_skill_search_roots`` order with the live profile dir (dropped if absent)."""
     from agent.skill_utils import TIER_LOCAL, get_skill_search_roots
@@ -193,7 +235,7 @@ def _skill_catalog(*, skip_disabled: bool = False, include_hidden: bool = False)
         TIER_PROJECT, is_disabled_entry, iter_project_skill_files, iter_skill_index_files, resolve_skill_catalog)
     cache_key = ("with_disabled" if skip_disabled else "filtered", include_hidden)
     disabled = set() if skip_disabled else _get_disabled_skill_names()
-    roots, _ = _skill_search_dirs()
+    roots, _ = skill_search_dirs()
     signature = _skills_scan_signature([d for _t, d in roots], disabled)
     now = time.monotonic()
     cached = _SKILLS_CACHE.get(cache_key)
@@ -233,7 +275,7 @@ def _skill_catalog(*, skip_disabled: bool = False, include_hidden: bool = False)
     return [dict(s) for s in skills]
 
 
-def _find_all_skills(*, skip_disabled: bool = False) -> list[dict[str, Any]]:
+def find_all_skills(*, skip_disabled: bool = False) -> list[dict[str, Any]]:
     """Loadable skills (name, description, category): ``name`` is what skill_view() accepts —
     the declared name, or the exact relative path for a same-tier duplicate. Shadowed and
     unloadable copies are left out. ``skip_disabled=True`` ignores disabled state (config UI)."""
@@ -241,7 +283,7 @@ def _find_all_skills(*, skip_disabled: bool = False) -> list[dict[str, Any]]:
             for s in _skill_catalog(skip_disabled=skip_disabled) if s["load_name"]]
 
 
-def _sort_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def sort_skills(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep every skill listing path ordered the same way."""
     return sorted(skills, key=lambda s: (s.get("category") or "", s["name"]))
 
@@ -250,7 +292,7 @@ def skills_list(category: str | None = None, task_id: str | None = None) -> str:
     """Tier 1 listing: name + description (+ category) only; ``task_id`` is handler parity."""
     try:
         _skills_dir().mkdir(parents=True, exist_ok=True)
-        all_skills = _find_all_skills()
+        all_skills = find_all_skills()
         try:
             from hermes_cli.plugins import discover_plugins, get_plugin_manager
             discover_plugins()
@@ -266,7 +308,7 @@ def skills_list(category: str | None = None, task_id: str | None = None) -> str:
                           "message": "No skills found in skills/ directory."})
         if category:
             all_skills = [s for s in all_skills if s.get("category") == category]
-        all_skills = _sort_skills(all_skills)
+        all_skills = sort_skills(all_skills)
         categories = sorted({s.get("category") for s in all_skills if s.get("category")})
         return _json({
             "success": True, "skills": all_skills, "categories": categories,
@@ -276,6 +318,18 @@ def skills_list(category: str | None = None, task_id: str | None = None) -> str:
         return tool_error(str(e), success=False)
 
 
+def _legacy_portable_skill_name(pm, namespace, bare):
+    """Portable plugin skills were named ``agent-plugin-<slug>-<sha8>:<skill>`` before they took the
+    plugin's own name; prompts and cron jobs saved since then may still carry that form. Resolved
+    through what that exact plugin registered, so a skill it lost to a name clash is not found."""
+    if not namespace.startswith("agent-plugin-"):
+        return None
+    keys = {key for key, loaded in pm._plugins.items()
+            if loaded.manifest.portable and loaded.manifest.data_namespace == namespace}
+    return next((qualified for qualified, entry in pm._plugin_skills.items()
+                 if entry.get("plugin_key") in keys and entry.get("bare_name") == bare), None)
+
+
 def _resolve_plugin_skill(name, file_path, task_id, preprocess):
     """``plugin:skill`` dispatch: ``(result_json, None)`` when answered, else ``(None,
     local_category_name)`` to fall through to the flat-tree scan — categorized local skills also use
@@ -283,10 +337,19 @@ def _resolve_plugin_skill(name, file_path, task_id, preprocess):
     from agent.skill_utils import is_valid_namespace, parse_qualified_name
     from hermes_cli.plugins import discover_plugins, get_plugin_manager
     namespace, bare = parse_qualified_name(name)
+    if namespace == "plugin" and ":" in bare:
+        # The skills index lists plugin skills under a "plugin" heading, and models write that
+        # heading as a prefix ("plugin:agent-plugin-blender-5a80e4ba:blender"). A bare skill name
+        # never holds a colon, so the remainder is the real qualified name.
+        name = bare
+        namespace, bare = parse_qualified_name(name)
     if not is_valid_namespace(namespace):
         return _fail(f"Invalid namespace '{namespace}' in '{name}'. Namespaces must match [a-zA-Z0-9_-]+."), None
     discover_plugins()  # idempotent
     pm = get_plugin_manager()
+    if legacy := _legacy_portable_skill_name(pm, namespace, bare):
+        name = legacy
+        namespace = legacy.partition(":")[0]
     active_memory_provider = None
     try:
         from plugins.memory import _get_active_memory_provider, _prune_inactive_memory_provider_skills
@@ -408,7 +471,7 @@ def _skill_linked_files(skill_dir: Optional[Path]) -> dict:
 def _skill_readiness(frontmatter: dict[str, Any], skill_name: str) -> tuple[dict, dict]:
     """Resolve required env vars / credential files (prompting for secrets where the surface
     allows) and register what's available for sandboxes. Returns ``(fields, extras)``: fields go
-    before ``_source_path`` in the skill_view result, extras after — key order is tool output."""
+    before the readiness extras in the skill_view result — key order is tool output."""
     required_env_vars = _get_required_environment_variables(frontmatter)
     from tools.terminal_scope import terminal_env
     backend = str(terminal_env("TERMINAL_ENV", "local")).strip().lower() or "local"
@@ -548,7 +611,7 @@ def _owning_search_dir(skill_md: Path, all_dirs) -> Optional[Path]:
     return max(owners, key=lambda d: len(d.parts), default=None)
 
 
-def _locate_skill(name: str, local_category_name: Optional[str], roots):
+def locate_skill(name: str, local_category_name: Optional[str], roots):
     """Unique on-disk skill for *name* over ``(tier, dir)`` *roots*: cross-tier precedence
     (project > local > create_dir > external, shadowed copies logged), same-tier collision refusal,
     same-root identical-copy ranking, quarantine gate, not-found listing. ``(error_json, skill_dir,
@@ -597,13 +660,9 @@ def _locate_skill(name: str, local_category_name: Optional[str], roots):
                 hint="Inspect the skill in the repo checkout, or untrust the repo with "
                 "`hermes skills untrust`."), None, None
     if not skill_md or not skill_md.exists():
-        all_names = [s["name"] for s in _find_all_skills()]
-        did_you_mean = _suggest_skill_names(name, all_names)
-        available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
-        hint = f"Use skills_list to see all available skills.{' Did you mean: ' + ', '.join(did_you_mean) if did_you_mean else ''}"
-        extra = {"did_you_mean": did_you_mean} if did_you_mean else {}
+        available = [s["name"] for s in sort_skills(find_all_skills())[:20]]
         return _fail(f"Skill '{name}' not found.", available_skills=available,
-                     hint=hint, **extra), None, None
+                     hint="Use skills_list to see all available skills"), None, None
     return None, skill_dir, skill_md
 
 
@@ -635,13 +694,13 @@ def skill_view(
     name: str, file_path: str | None = None, task_id: str | None = None, preprocess: bool = True,
     schema_only: bool = False) -> str:
     """View a skill (SKILL.md) or a file within its directory, as JSON. ``name`` is a skill name
-    or path ("axolotl", "03-fine-tuning/axolotl"); "plugin:skill" resolves plugin-provided
+    or path ("axolotl", "03-fine-tuning/axolotl"); "<plugin>:<skill>" resolves plugin-provided
     skills. ``preprocess`` applies the configured SKILL.md template / inline shell rendering;
     slash/preload callers render the message themselves."""
     try:
         # Validate before the ':' dispatch so a Windows drive path (C:\skills\foo) can't be
         # reinterpreted as a plugin namespace.
-        if lookup_error := _skill_lookup_path_error(name):
+        if lookup_error := skill_lookup_path_error(name):
             return _fail(lookup_error, hint=_LOOKUP_HINT)
         local_category_name: str | None = None
         if ":" in name:  # plugin registry; bare names use the flat-tree scan below
@@ -650,11 +709,11 @@ def skill_view(
                 return served
         # The fall-through form (namespace/bare) joins onto each search dir too; re-validate it
         # since `bare` is not namespace-checked.
-        if local_category_name and (lookup_error := _skill_lookup_path_error(local_category_name)):
+        if local_category_name and (lookup_error := skill_lookup_path_error(local_category_name)):
             return _fail(lookup_error, hint=_LOOKUP_HINT)
-        roots, active_skills_dir = _skill_search_dirs()
+        roots, active_skills_dir = skill_search_dirs()
         all_dirs = [d for _t, d in roots]
-        error, skill_dir, skill_md = _locate_skill(name, local_category_name, roots)
+        error, skill_dir, skill_md = locate_skill(name, local_category_name, roots)
         if error is not None:
             return error
         try:  # read once — reused for platform check and main content
@@ -741,9 +800,6 @@ def skill_view(
             "linked_files": linked_files if linked_files else None,
             "usage_hint": "To view linked files, call skill_view(name, file_path) where file_path is e.g. 'references/api.md' or 'assets/config.yaml'" if linked_files else None,
             **readiness,
-            # Internal: absolute source path for the repeat-view dedup fingerprint.
-            "_source_path": str(skill_md),
-            **({"schema": skill_schema} if skill_schema else {}),
             **readiness_extras}
         if deps_note:
             result["deps_note"] = deps_note
@@ -774,13 +830,13 @@ SKILLS_LIST_SCHEMA = {
 
 SKILL_VIEW_SCHEMA = {
     "name": "skill_view",
-    "description": "Skills allow for loading information about specific tasks and workflows, as well as scripts and templates. Load a skill's full content or access its linked files (references, templates, scripts). First call returns SKILL.md content plus a 'linked_files' dict showing available references/templates/scripts. To access those, call again with file_path parameter.",
+    "description": "Load a skill's SKILL.md, or one of its linked references, templates or scripts. The first call returns SKILL.md plus a 'linked_files' dict; call again with file_path to read one.",
     "parameters": {
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "The skill name (use skills_list to see available skills). For plugin-provided skills, use the qualified form 'plugin:skill' (e.g. 'superpowers:writing-plans').",
+                "description": "The skill name (use skills_list to see available skills). For plugin-provided skills, use the qualified form 'plugin:skill'.",
             },
             "file_path": {
                 "type": "string",
@@ -801,252 +857,32 @@ registry.register(
     check_fn=check_skills_requirements, emoji="📚")
 
 
-def _record_active_skill_view(skill_name: str, **kw) -> None:
-    """Track every successful skill_view, including unchanged dedup stubs."""
-
-    try:
-        from tools.skill_usage import bump_use, bump_view
-
-        bump_view(skill_name)
-        # A skill_view tool call is the agent actively loading the skill to
-        # act on it. The unchanged-content stub saves prompt tokens, but it is
-        # still a real use for lifecycle and local Wisdom qualification.
-        bump_use(
-            skill_name,
-            task_id=kw.get("task_id"),
-            session_id=kw.get("session_id"),
-        )
-    except Exception:
-        pass
-
-
 def _skill_view_with_bump(args, **kw):
     """Invoke skill_view, then bump view_count/use on success (best-effort). Repeat-view dedup
-    mirrors read_file's unchanged-stub: a SAME, unchanged skill file already loaded in this
-    session returns a short stub (cache cleared on context compression)."""
+    mirrors read_file's unchanged-stub: a result byte-identical to one already served for the
+    same skill file in this session returns a short stub (cache cleared on context compression)."""
     name = args.get("name", "")
     task_id = kw.get("task_id")
-    schema_only = args.get("schema_only", False)
     # The background-review fork shares the parent's task_id (prefix-cache parity). A stub there
     # (a) skips the read-mark its read-before-write guard requires and (b) lets it patch from a
     # possibly-pruned transcript copy (#95976). No dedup in the fork; None also keeps its views
     # out of the parent's bucket.
     dedup_task_id = None if is_background_review() else task_id
-    if not schema_only and (stub := _check_skill_view_dedup(dedup_task_id, name, args.get("file_path"))) is not None:
-        with suppress(Exception):
-            if resolved := json.loads(stub).get("name") or name:
-                _record_active_skill_view(str(resolved), **kw)
-        return stub
-    result = skill_view(name, file_path=args.get("file_path"), task_id=task_id, schema_only=schema_only)
+    result = skill_view(name, file_path=args.get("file_path"), task_id=task_id)
     with suppress(Exception):
         parsed = json.loads(result)
         if isinstance(parsed, dict) and parsed.get("success"):
-            if not schema_only:
-                _record_skill_view(dedup_task_id, name, args.get("file_path"), parsed)
+            if (stub := dedup_skill_view(dedup_task_id, name, args.get("file_path"), parsed, result)) is not None:
+                return stub
             if resolved := parsed.get("name") or name:  # qualified forms return the canonical name
-                if schema_only:
-                    from tools.skill_usage import bump_view
-                    bump_view(str(resolved))
-                else:
-                    _record_active_skill_view(str(resolved), **kw)
+                from tools.skill_usage import bump_use, bump_view
+                bump_view(str(resolved))
+                # Viewing is actively loading the skill to act on it — that counts as use
+                # (the curator's stale timer keys off last_used_at).
+                bump_use(str(resolved), task_id=kw.get("task_id"), session_id=kw.get("session_id"))
     return result
 
 
 registry.register(
     name="skill_view", toolset="skills", schema=SKILL_VIEW_SCHEMA, handler=_skill_view_with_bump,
     check_fn=check_skills_requirements, emoji="📚")
-
-
-
-
-# --- Search & Relationships (Fork Evolution) ----------------------------------
-
-def skills_search(query: str, limit: int = 5) -> str:
-    """Rank available skills by relevance to a query (task or state).
-
-    Parameters:
-        query: Description of the task or state to match against skills.
-        limit: Maximum number of skills to return (default: 5).
-
-    Returns:
-        JSON string with the best-first ranked skills (name, description,
-        category, score, matched_terms).
-    """
-    try:
-        from tools.skill_retrieval import rank_skills
-
-        if not isinstance(query, str) or not query.strip():
-            return tool_error("query must be a non-empty string", success=False)
-
-        try:
-            limit_int = int(limit)
-        except (TypeError, ValueError):
-            limit_int = 5
-        if limit_int <= 0:
-            limit_int = 5
-
-        ranked = rank_skills(query, limit=limit_int)
-        results = [
-            {
-                "name": r.name,
-                "description": r.description,
-                "category": r.category,
-                "score": r.score,
-                "matched_terms": r.matched_terms,
-            }
-            for r in ranked
-        ]
-        return json.dumps(
-            {
-                "success": True,
-                "query": query,
-                "skills": results,
-                "count": len(results),
-                "hint": "Use skill_view(name) to load full content for a relevant skill",
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        return tool_error(str(e), success=False)
-
-
-def _build_skill_graph():
-    """Build a :class:`SkillGraph` over every scanned skills directory."""
-    from agent.skill_graph import SkillGraph
-    from agent.skill_utils import get_external_skills_dirs
-
-    dirs = []
-    if _skills_dir().exists():
-        dirs.append(_skills_dir())
-    dirs.extend(get_external_skills_dirs())
-    return SkillGraph.from_skills_dirs(dirs)
-
-
-def skill_relationships(name: str = None) -> str:
-    """Report the dependency/composition/governance graph around skill(s)."""
-    try:
-        graph = _build_skill_graph()
-        validation = graph.validate()
-
-        if name:
-            if name not in graph:
-                suggestions = _suggest_skill_names(name, graph.names())
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": f"Skill '{name}' not found in the skill graph.",
-                        "suggestions": suggestions,
-                    },
-                    ensure_ascii=False,
-                )
-            node = graph.node(name)
-            return json.dumps(
-                {
-                    "success": True,
-                    "skill": name,
-                    "edges": graph.edges_of(name),
-                    "provides": node.provided() if node else [],
-                    "closure": graph.closure(name),
-                    "blast_radius": graph.blast(name),
-                    "graph_ok": validation.ok,
-                },
-                ensure_ascii=False,
-            )
-
-        return json.dumps(
-            {
-                "success": True,
-                "skill_count": len(graph),
-                "validation": validation.as_dict(),
-                "topological_order": graph.topological_order(),
-                "capability_surface": graph.capability_surface(),
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        return tool_error(str(e), success=False)
-
-
-SKILLS_SEARCH_SCHEMA = {
-    "name": "skills_search",
-    "description": (
-        "Rank available skills by relevance to the CURRENT task or state, "
-        "best-first. Prefer this over skills_list when you know what you are "
-        "trying to do — pass a short description of the task/state as the query "
-        "and get back only the few most relevant skills (with match terms and a "
-        "relevance score), then skill_view the one you want."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Free-form text describing the current task or state to match skills against.",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Maximum number of ranked skills to return (default 5).",
-            },
-        },
-        "required": ["query"],
-    },
-}
-
-SKILL_RELATIONSHIPS_SCHEMA = {
-    "name": "skill_relationships",
-    "description": "Inspect the skill dependency/composition graph (AIP). With a skill name: returns its declared edges (requires / conflicts-with / composes-with / deprecates), its transitive 'requires' closure (the minimal set to load it), and its blast radius (dependents, conflicts, composition partners). Without a name: validates the whole graph (missing targets, requires-cycles, conflicts) and returns the dependency-first load order.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "OPTIONAL: skill name to inspect. Omit to validate and order the whole graph.",
-            }
-        },
-        "required": [],
-    },
-}
-
-registry.register(
-    name="skills_search",
-    toolset="skills",
-    schema=SKILLS_SEARCH_SCHEMA,
-    handler=lambda args, **kw: skills_search(
-        query=args.get("query", ""), limit=args.get("limit", 5)
-    ),
-    check_fn=check_skills_requirements,
-    emoji="🔎",
-)
-registry.register(
-    name="skill_relationships",
-    toolset="skills",
-    schema=SKILL_RELATIONSHIPS_SCHEMA,
-    handler=lambda args, **kw: skill_relationships(name=args.get("name")),
-    check_fn=check_skills_requirements,
-    emoji="🕸️",
-)
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-from enum import Enum  # noqa: F401,E402
-from typing import Set  # noqa: F401,E402
-import re  # noqa: F401,E402
-import threading  # noqa: F401,E402
-
-
-_PLUGIN_COMPAT_LAZY = {
-    'display_hermes_home': ('hermes_constants', 'display_hermes_home'),
-    'env_var_enabled': ('utils', 'env_var_enabled'),
-}
-
-
-def __getattr__(name):  # PEP 562 — lazy so no import cycles
-    target = _PLUGIN_COMPAT_LAZY.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    import importlib
-    return getattr(importlib.import_module(target[0]), target[1])
-# ---- END PLUGIN-COMPAT ----

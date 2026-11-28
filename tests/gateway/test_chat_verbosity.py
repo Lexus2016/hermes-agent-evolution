@@ -19,6 +19,18 @@ from gateway.display_config import (
 )
 
 
+@pytest.fixture
+def platform_entries():
+    """Load platform plugins so a platform's display tier and overrides resolve.
+
+    Telegram's default (tool_progress off) now ships on its PlatformEntry;
+    without discovery the resolver falls through to the global default.
+    """
+    from hermes_cli.plugins import discover_plugins
+
+    discover_plugins()
+
+
 # ---------------------------------------------------------------------------
 # Mode preset values match the issue's verbosity-modes table
 # ---------------------------------------------------------------------------
@@ -75,20 +87,20 @@ class TestChatOverrideResolution:
         # Non-overridden keys still follow the quiet preset.
         assert resolve_display_setting(cfg, "telegram", "tool_progress", chat_id="mix") == "off"
 
-    def test_mode_normal_falls_through_to_platform_default(self):
+    def test_mode_normal_falls_through_to_platform_default(self, platform_entries):
         cfg = {"display": {"chat_overrides": {"n": {"mode": "normal"}}}}
         # Falls through unchanged: telegram platform default is "off".
         assert resolve_display_setting(cfg, "telegram", "tool_progress", chat_id="n") == "off"
         # And discord's platform default "all" is preserved too.
         assert resolve_display_setting(cfg, "discord", "tool_progress", chat_id="n") == "all"
 
-    def test_preset_without_this_setting_falls_through(self):
+    def test_preset_without_this_setting_falls_through(self, platform_entries):
         # tool_preview_length is not in any mode preset → falls through to the
         # platform default even inside a quiet chat.
         cfg = {"display": {"chat_overrides": {"g": {"mode": "quiet"}}}}
         assert resolve_display_setting(cfg, "slack", "tool_preview_length", chat_id="g") == 40
 
-    def test_unknown_mode_falls_through(self):
+    def test_unknown_mode_falls_through(self, platform_entries):
         cfg = {"display": {"chat_overrides": {"g": {"mode": "bogus"}}}}
         assert resolve_display_setting(cfg, "telegram", "tool_progress", chat_id="g") == "off"
 
@@ -113,7 +125,7 @@ class TestChatOverrideResolution:
         cfg2 = {"display": {"chat_overrides": {-1001234567890: {"mode": "verbose"}}}}
         assert resolve_display_setting(cfg2, "telegram", "tool_progress", chat_id="-1001234567890") == "all"
 
-    def test_full_fallback_chain_chat_then_platform_then_tier_then_global(self):
+    def test_full_fallback_chain_chat_then_platform_then_tier_then_global(self, platform_entries):
         # A chat override for one setting doesn't leak into other settings /
         # other chats: the rest of the chain (platform → tier → global) still runs.
         cfg = {
@@ -219,7 +231,7 @@ class TestChatIdNoneRegression:
             == resolve_display_setting(cfg, platform, setting, chat_id=None)
         )
 
-    def test_chat_overrides_present_but_no_chat_id_is_inert(self):
+    def test_chat_overrides_present_but_no_chat_id_is_inert(self, platform_entries):
         # Even with chat_overrides configured, omitting chat_id must ignore them.
         cfg = {"display": {"chat_overrides": {"g": {"mode": "verbose"}}, "quiet_chats": ["g"]}}
         # telegram default stays "off" — the per-chat layer never runs.

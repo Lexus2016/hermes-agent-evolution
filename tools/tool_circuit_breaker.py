@@ -62,6 +62,35 @@ def get_strategy_recommendation(tool_name: str, failure_class: str, last_error: 
     return "Inspect tool arguments and preconditions before retrying."
 
 
+CIRCUIT_BREAKER_MARKER = "[CIRCUIT_BREAKER]"
+
+
+def append_diagnostic(result: Any, event: Optional[Dict[str, Any]],
+                      *, label: str = "Recommended action") -> Any:
+    """Append the tripped-breaker note to a text tool result, once.
+
+    Kept in one place because the note is plain text on a JSON payload: any
+    consumer that parses the result (the execute_code RPC stubs do) must be
+    able to remove it again with :func:`strip_diagnostic`.
+    """
+    if not event or not isinstance(result, str) or CIRCUIT_BREAKER_MARKER in result:
+        return result
+    recommendation = event.get("strategy_recommendation") or ""
+    return (
+        f"{result}\n\n{CIRCUIT_BREAKER_MARKER} Tool '{event.get('tool_name')}' has failed "
+        f"{event.get('consecutive_failures')} consecutive times (budget: {event.get('budget')}). "
+        f"Class: {event.get('failure_class')}. {label}: {recommendation}"
+    )
+
+
+def strip_diagnostic(result: Any) -> Any:
+    """Drop a trailing breaker note, leaving the original result untouched."""
+    if not isinstance(result, str):
+        return result
+    idx = result.find("\n\n" + CIRCUIT_BREAKER_MARKER)
+    return result[:idx] if idx != -1 else result
+
+
 class _ToolCircuitBreakerTracker:
     """Thread-safe tracker for tool invocation success rates and retry spirals."""
 

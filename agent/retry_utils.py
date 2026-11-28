@@ -200,6 +200,28 @@ def adaptive_rate_limit_backoff(
     return jittered_backoff(1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2), "zai_coding_overload_long"
 
 
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def retry_budget_for(agent: Any) -> int:
+    """Retry ceiling for one API request.
+
+    ``agent._api_max_retries`` is the interactive budget. Cron and other unattended runs
+    have no human watching a transient 429/overload spike, so ``agent.cron_api_max_retries``
+    (default 15) raises the ceiling for ``platform == "cron"`` — it never lowers a larger
+    configured interactive value (#2376).
+    """
+    base = _positive_int(getattr(agent, "_api_max_retries", 3), 3)
+    if str(getattr(agent, "platform", "") or "") != "cron":
+        return base
+    return max(base, _positive_int(getattr(agent, "_cron_api_max_retries", 15), 15))
+
+
 def zai_coding_overload_retry_ceiling(short_attempts: int = _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS) -> int:
     """Retry-loop ceiling for the full Z.AI overload schedule: one past the last long entry,
     because the loop gives up when ``retry_count >= ceiling`` BEFORE computing the attempt's

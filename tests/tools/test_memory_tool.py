@@ -1347,17 +1347,36 @@ class TestExternalDriftGuard:
         result = store.replace("memory", "Entry two", "Entry two replaced.")
         assert result["success"] is True
 
-    def test_error_message_points_at_remediation(self, store):
-        """The error string must reference the backup AND remediation steps."""
-        store.add("memory", "Initial.")
-        self._plant_drift(store)
+    def test_entries_stay_removable_after_the_limit_is_lowered(self, store, monkeypatch):
+        """An entry written under a larger limit is no external drift: pruning stays the way back
+        under a lowered limit."""
+        roomy = MemoryStore(memory_char_limit=2200, user_char_limit=1375)
+        work, home = ("Work:" + " firmware and vision pipelines;" * 16,  # each > the fixture's 300
+                      "Home:" + " garden, workshop and bikes;" * 16)
+        for entry in (work, home, "Prefers metric.", "Uses vim."):
+            assert roomy.add("user", entry)["success"]
 
-        result = store.replace("memory", "Initial", "Replacement.")
-        assert result["success"] is False
-        # The model has to know what file to look at and what to do.
-        assert ".bak." in result["error"]
-        assert "remediation" in result
-        assert "26045" in result["error"]  # tracking-issue back-reference
+        pruned = json.loads(memory_tool(target="user", store=store, operations=[
+            {"action": "remove", "old_text": "Prefers metric"}, {"action": "remove", "old_text": "Uses vim"}]))
+        assert pruned["success"] is True
+        monkeypatch.setattr("tools.memory_tool_store.time.time", lambda: 1_700_000_000.0)  # same second
+        first, second = store.remove("user", "Work:"), store.remove("user", "Home:")
+        assert first["success"] and second["success"] and first["removed_entry"] == work
+        assert MemoryStore._read_file(store._path_for("user")) == []
+        # Each delete of an oversized entry keeps its own snapshot, even within the same second.
+        assert first["drift_backup"] != second["drift_backup"]
+        assert work in Path(first["drift_backup"]).read_text(encoding="utf-8")
+
+    def test_removing_an_entry_with_glued_free_text_keeps_a_snapshot(self, store):
+        """Free text appended without a delimiter rides on the last entry; deleting that entry
+        must never take the text with it unless a snapshot holds it."""
+        store.add("memory", "User likes brevity.")
+        drifted = self._plant_drift(store).read_text(encoding="utf-8")
+
+        result = store.remove("memory", "User likes")
+
+        assert result["success"] is True
+        assert Path(result["drift_backup"]).read_text(encoding="utf-8") == drifted
 
     def test_drift_guard_also_protects_user_target(self, store):
         """USER.md gets the same guarantee as MEMORY.md."""
@@ -1913,10 +1932,12 @@ class TestBatchRefusesToEmptyNonEmptyStore:
         self, store, target, seed
     ):
         assert store.add(target, seed)["success"] is True
+        assert store.add(target, "second entry here")["success"] is True
         path = store._path_for(target)
         before = path.read_text(encoding="utf-8")
 
-        result = store.apply_batch(target, [{"action": "remove", "old_text": seed}])
+        result = store.apply_batch(target, [{"action": "remove", "old_text": seed},
+                                            {"action": "remove", "old_text": "second entry"}])
 
         assert result["success"] is False
         assert "current_entries" not in result  # batch abort never echoes the store (#97316)

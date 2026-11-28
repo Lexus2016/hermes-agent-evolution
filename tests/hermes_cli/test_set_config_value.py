@@ -252,14 +252,14 @@ class TestConfigGetPhantomKeyNotice:
     def test_unseeded_live_key_notice_hedges_instead_of_asserting_unread(
         self, _isolated_hermes_home, capsys
     ):
-        # The check is a DEFAULT_CONFIG walk; ``browser.cloud_provider`` is deliberately unseeded
-        # yet read by tools/browser_tool_cloud.py, so the notice must not claim it is never read.
-        (_isolated_hermes_home / "config.yaml").write_text("browser:\n  cloud_provider: local\n")
+        # The check is a DEFAULT_CONFIG walk; ``gateway.proxy_url`` is deliberately unseeded
+        # yet read by gateway/run_turn.py, so the notice must not claim it is never read.
+        (_isolated_hermes_home / "config.yaml").write_text("gateway:\n  proxy_url: http://127.0.0.1:1\n")
 
-        config_command(argparse.Namespace(config_command="get", key="browser.cloud_provider", json=False))
+        config_command(argparse.Namespace(config_command="get", key="gateway.proxy_url", json=False))
 
         captured = capsys.readouterr()
-        assert captured.out.strip() == "local"
+        assert captured.out.strip() == "http://127.0.0.1:1"
         assert "may not read it" in captured.err
         assert "does not read it" not in captured.err
 
@@ -387,7 +387,7 @@ def _write_cron_jobs(tmp_path, jobs):
 class TestCronModelChangeNotice:
     """A global model change tells the operator which unpinned jobs stay on their snapshot."""
 
-    def test_notice_says_jobs_keep_running_and_names_the_user_owned_pin_path(
+    def test_notice_says_jobs_are_skipped_and_names_the_pin_and_repin_paths(
         self,
         _isolated_hermes_home,
         capsys,
@@ -407,8 +407,9 @@ class TestCronModelChangeNotice:
         set_config_value("model.default", "new-model")
 
         notice = capsys.readouterr().out
-        assert "keeps running" in notice
-        assert "fail closed" not in notice
+        assert "will be skipped at the next run" in notice
+        assert "cron.model_drift_guard" in notice
+        assert "hermes cron repin <job_id>" in notice
         assert "hermes cron edit <job_id> --provider <provider> --model <model>" in notice
         assert "cronjob action=update" not in notice
 
@@ -553,9 +554,9 @@ class TestSchemaValidation:
         assert f"Did you mean: {suggestion}" in err
 
     @pytest.mark.parametrize("key,value,expected,suggestion", [
-        # ``stt.provider`` is read at runtime (tools/transcription_tools.py) but has no seeded
-        # default: a stored value is an explicit user pick, so the schema walk must not refuse it.
-        ("stt.provider", "whisper", "whisper", None),
+        # ``gateway.proxy_url`` is read at runtime (gateway/run_turn.py) but has no seeded
+        # default, so the schema walk must not refuse it.
+        ("gateway.proxy_url", "http://127.0.0.1:1", "http://127.0.0.1:1", None),
         # TRADE-OFF made explicit: a same-section typo (``agent.max_turnz``) is indistinguishable
         # from an unseeded key, so it is written too — the user gets the sibling suggestion
         # (``agent.max_turns``) instead of a refusal.

@@ -1,4 +1,4 @@
-# health: allow FILE_LINES -- security fix for #82010: distinguish an explicitly-empty toolset allowlist (fail closed, nothing allowed) from an absent one (no restriction); the added lines are minimal fail-closed branches at this existing chokepoint
+# health: allow FILE_LINES -- security fix for #82010: distinguish an explicitly-empty toolset allowlist (fail closed, nothing allowed) from an absent one (no restriction); the added lines are minimal fail-closed branches at this existing chokepoint. Also #141468: match the `mcp-<server>` toolset spelling so a narrow job's MCP allowlist is not widened into every enabled server — a minimal branch at the same chokepoint.
 """Cron job scheduler: tick() runs due jobs (gateway calls it every 60s from a background thread).
 A file lock (~/.hermes/cron/.tick.lock) keeps overlapping processes to one tick at a time.
 """
@@ -42,19 +42,23 @@ except ImportError:
     except ImportError:
         msvcrt = None
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # Must precede repo-level imports: standalone invocations (e.g. module reload after
 # `hermes update`) otherwise fail with ModuleNotFoundError for hermes_time et al.
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_checkout_root = Path(__file__).resolve().parent.parent
+# Append, never prepend: the checkout must not shadow same-named installed packages.
+if str(_checkout_root) not in sys.path:
+    sys.path.append(str(_checkout_root))
 
 from cron.worker_bootstrap import WORKER_MARKER, finish_worker_boot
 from hermes_constants import get_hermes_home, hermes_home_key
 from hermes_cli.observability.shared_metrics_gateway import note_cron_execution, note_cron_skipped
-from cron.env_settings import cron_env_setting
+from cron.env_settings import cron_env_setting, cron_seconds_setting
 from hermes_cli._subprocess_compat import windows_hide_flags
 from hermes_cli.config import (
-    load_config, load_config_readonly, resolve_cron_model_drift_defaults)
+    load_config, load_config_readonly)
+from hermes_cli.config_backend import ConfigBackendUnavailable
 from hermes_cli.fallback_config import get_fallback_chain, scoped_fallback_chain
 from hermes_time import now as _hermes_now, safe_strftime
 from agent.interrupt_compat import request_hard_interrupt
@@ -932,7 +936,15 @@ def _merge_mcp_into_per_job_toolsets(per_job: list[str], cfg: dict) -> list[str]
     # lazy: avoid heavy hermes_cli import at module load; shares MCP-membership with gateway/CLI
     from hermes_cli.tools_config import enabled_mcp_server_names
     enabled_mcp = enabled_mcp_server_names(cfg)
-    if set(result) & enabled_mcp:
+    # A job names an MCP server by its TOOLSET name (``mcp-<server>``) or by the bare alias the
+    # registry registers for it; compare against BOTH, or a job that named one server never matched
+    # and the fallback below unioned EVERY enabled server into its allowlist (#141468).
+    # A server that is CONFIGURED but disabled still counts as named: it is the user's selection, it
+    # stays off, and it must not fall through to every enabled server either - the same rule the
+    # interactive resolver follows (hermes_cli.tools_config._merge_mcp_servers).
+    configured = cfg.get("mcp_servers") if isinstance(cfg.get("mcp_servers"), dict) else {}
+    known = enabled_mcp | {str(name) for name in configured}
+    if set(result) & (known | {f"mcp-{name}" for name in known}):
         return result
     for name in sorted(enabled_mcp):
         if name not in result:
@@ -1061,10 +1073,14 @@ from cron.jobs import (
 from cron import store_health
 from cron.execution_identity import enter_cron_execution, exit_cron_execution
 from cron.executions import (
-    _TERMINAL_STATES, HANDOFF_ADOPTION_GRACE_SECONDS, create_execution, finish_execution,
+    FIRER_FINISHED_STATES, _TERMINAL_STATES, HANDOFF_ADOPTION_GRACE_SECONDS, create_execution, finish_execution,
     get_execution, mark_execution_handoff_pending, mark_execution_running,
     recover_interrupted_executions, settle_unstarted_execution, terminalize_dead_owner)
 from cron.scheduler_liveness import ExecutionProgressStamper, _inactivity_watchdog_loop
+from cron.scheduler_bookkeeping import _classify_delivery_outcome
+from cron.cancellation import (CancelRequest, _CancelEventLike, _CombinedCancelEvent, cancel_reason,
+                               clear_cancel, finish_lost_execution,
+                               run_job_unless_cancelled as _run_job_unless_cancelled)
 
 # Response marker that suppresses delivery (output is still saved locally for audit).
 SILENT_MARKER = "[SILENT]"
@@ -1189,29 +1205,6 @@ _INFLIGHT_MIN_ALLOWANCE_MINUTES = 30.0
 # false "ok" (#60432). Token keying keeps an interruption scoped to that exact execution: a later run of the
 # same job ID (recurring jobs reuse the ID every fire) must not inherit the stale flag.
 _interrupted_job_ids: set = set()
-
-
-class _CancelEventLike(Protocol):
-    """Structural type for cancellation sources (``threading.Event``, ``_CombinedCancelEvent``)."""
-
-    def is_set(self) -> bool: ...
-    def set(self) -> None: ...
-
-
-class _CombinedCancelEvent:
-    """Duck-typed ``threading.Event`` ORing several cancellation sources (fire-claim heartbeat
-    ``lost_ownership`` + per-transport events). Workers only call is_set()/set(), so no pump thread.
-    """
-
-    def __init__(self, *events: Optional[_CancelEventLike]) -> None:
-        self._events = [event for event in events if event is not None]
-
-    def is_set(self) -> bool:
-        return any(event.is_set() for event in self._events)
-
-    def set(self) -> None:
-        for event in self._events:
-            event.set()
 
 
 def get_running_job_ids() -> frozenset[str]:
@@ -1742,18 +1735,50 @@ def _consume_interrupted_flag(job_id: str, token: Optional[object] = None) -> bo
         return hit
 
 
+_DEFAULT_CRON_INACTIVITY_SECONDS = 900.0
+
+
 def _cron_inactivity_seconds() -> float:
-    """Parse HERMES_CRON_TIMEOUT (seconds). 0 = unlimited; bad input = 600. Shared by the
-    inactivity monitor and the cwd-lock bound so they can't drift: the lock bound must stay >= the
+    """Inactivity limit for one cron agent run: ``HERMES_CRON_TIMEOUT`` wins over
+    ``cron.inactivity_timeout_seconds`` (default 900). 0 = unlimited. Shared by the inactivity
+    monitor and the cwd-lock bound so they can't drift: the lock bound must stay >= the
     inactivity limit or waiters fail while a healthy holder runs."""
-    raw = cron_env_setting("HERMES_CRON_TIMEOUT").strip()
-    if not raw:
-        return 600.0
+    return cron_seconds_setting(
+        "HERMES_CRON_TIMEOUT", "inactivity_timeout_seconds", _DEFAULT_CRON_INACTIVITY_SECONDS)
+
+
+def _cron_delegation_drain_seconds() -> float:
+    """Background-delegation drain budget: ``HERMES_CRON_DELEGATION_DRAIN_SECONDS`` wins over
+    ``cron.delegation_drain_seconds`` (default 1200). 0 disables the drain."""
+    return cron_seconds_setting(
+        "HERMES_CRON_DELEGATION_DRAIN_SECONDS", "delegation_drain_seconds", 1200.0)
+
+
+def _drain_cron_delegations(cron_session_id: str, job_name: str) -> None:
+    """Wait for the run's background delegations before the cron session tears down (#1200).
+
+    ``delegate_task(background=true)`` children run on a daemon executor, so without this barrier
+    the session ends while they are still running and their completion events and artifacts are
+    orphaned. A missing registry or a failing poll must never fail a run that already completed.
+    """
+    if not cron_session_id:
+        return
+    deadline = _cron_delegation_drain_seconds()
+    if deadline <= 0:
+        return
     try:
-        return float(raw)
-    except (ValueError, TypeError):
-        logger.warning("Invalid HERMES_CRON_TIMEOUT=%r; using default 600s", raw)
-        return 600.0
+        from tools.async_delegation import wait_for_session_delegations
+
+        outcome = wait_for_session_delegations(cron_session_id, deadline_seconds=deadline)
+    except Exception:
+        logger.debug("Job '%s': background-delegation drain failed", job_name, exc_info=True)
+        return
+    if outcome.get("waited"):
+        logger.info(
+            "Job '%s': drained %s background delegation(s) for session %s "
+            "(%s completed, %s interrupted, timed_out=%s)",
+            job_name, outcome.get("waited"), cron_session_id,
+            outcome.get("completed"), outcome.get("interrupted"), outcome.get("timed_out"))
 
 
 def _get_parallel_pool(max_workers: Optional[int]) -> concurrent.futures.ThreadPoolExecutor:
@@ -1919,15 +1944,19 @@ def drain_delivery_queue(adapters, loop) -> int:
     # open/create entirely until a worker has actually queued something.
     if not _path().exists():
         return 0
-    return drain(
-        lambda queued_job, queued_content, queued_for_failure: _deliver_result(
-            queued_job,
-            queued_content,
-            adapters=adapters,
-            loop=loop,
+    def send(queued_job, queued_content, queued_for_failure):
+        error = _deliver_result(
+            queued_job, queued_content, adapters=adapters, loop=loop,
             for_failure=queued_for_failure,
         )
-    )
+        # The ping left the process: book the incident alerted. A notice every target hid
+        # (warning notifications suppressed) is a durable disposition, not an alert.
+        if (not error and queued_for_failure
+                and not queued_job.get("_notification_all_targets_suppressed")):
+            _mark_incident_alerted(queued_job.get("_failure_incident_id"))
+        return error
+
+    return drain(send)
 
 
 _DEFAULT_SCRIPT_TIMEOUT = 3600  # seconds (1 hour)
@@ -2040,16 +2069,6 @@ class _BoundedCronSessionDB:
         return _bounded
 
 
-def _job_doc_header(job_name: str, job_id: str, now_iso: str, mode: str) -> str:
-    """Common markdown header for the short-circuit run docs (no_agent / monitor)."""
-    return (
-        f"# Cron Job: {job_name}\n\n"
-        f"**Job ID:** {job_id}\n"
-        f"**Run Time:** {now_iso}\n"
-        f"**Mode:** {mode}\n"
-    )
-
-
 def _resolve_job_workdir(job: dict, job_id: str) -> Optional[str]:
     """Configured job workdir, or None when unset / no longer a directory (logged)."""
     workdir = (job.get("workdir") or "").strip() or None
@@ -2079,7 +2098,7 @@ def _run_no_agent_job(
     script_path = job.get("script")
     # Legacy/hand-edited no_agent job without a script: pause it, or it re-fires every tick.
     if not str(script_path or "").strip():
-        from cron.jobs import NO_AGENT_WITHOUT_SCRIPT_ERROR
+        from cron.jobs_invariants import NO_AGENT_WITHOUT_SCRIPT_ERROR
 
         return _block_and_pause_job(job_id, job_name, NO_AGENT_WITHOUT_SCRIPT_ERROR)
 
@@ -2164,12 +2183,7 @@ class _CronJobConfig:
     cron_default_provider: str
 
 
-# Marker prefix for a #44585 drift-guard skip. Same alert-once contract as
-# blocked_config: run_one_job keys off it to record last_status and the
-# ``:silent`` variant means "already alerted on a previous tick — do not
-# deliver again" (the drift_alerted bit on the job record, #73506 shape).
 DRIFT_SKIP_MARKER = "[drift_skip]"
-DRIFT_SKIP_SILENT_MARKER = "[drift_skip:silent]"
 
 
 def _cron_drift_auto_repin_enabled(cfg: dict) -> bool:
@@ -2224,44 +2238,20 @@ def _auto_repin_drifted_job(job_id: str, changes: str) -> bool:
     return True
 
 
-def _snapshot_pin(job: dict, axis: str, current: str, job_id: str) -> str:
-    """The creation snapshot is an unpinned axis's effective pin: return it, logging once when it
-    differs from *current* (the live global default); ``""`` for legacy jobs without one, which keep
-    following the global default. A global model/provider change must never stop a cron job; a job
-    keeps running on what it was created under until the operator pins it or sets a cron.* fleet
-    default (#44585)."""
-    snapshot = str(job.get(f"{axis}_snapshot") or "").strip()
-    if snapshot and current and snapshot.lower() != current.lower():
-        logger.info(
-            "Job '%s': running on creation-snapshot %s %r (global default is now %r); "
-            "`hermes cron resnap %s` adopts the new default (stays unpinned), "
-            "`hermes cron edit %s --%s <value>` or cron.%s in config.yaml pins it.",
-            job_id, axis, snapshot, current, job_id, job_id, axis,
-            "model" if axis == "model" else "model_provider")
-    return snapshot
-
-
 def _load_cron_job_config(job: dict, job_id: str, job_name: str) -> _CronJobConfig:
-    """Precedence: per-job model (persisted in jobs.json) > managed profile override > first-run
-    creation snapshot > HERMES_MODEL > config ``model:``. Re-read every tick (no cache) so
-    ``hermes cron edit --model`` applies next tick."""
-    stage = None
-    with contextlib.suppress(Exception):
-        from cron import evolution_preflight
-        stage = evolution_preflight.evolution_job_stage(job)
-    agent_owns_routing = bool(stage)
-    model = (
-        ""
-        if agent_owns_routing
-        else job.get("model") or cron_env_setting("HERMES_MODEL") or ""
-    )
+    """Load config.yaml and resolve the run's model: per-job pin > cron.model (fleet default) >
+    the main agent model (config ``model:``, then HERMES_MODEL) > the claimed welcome trial's. Re-read
+    every tick (no cache) so ``hermes cron edit --model`` and ``hermes model`` both apply next tick."""
+    from hermes_cli.anon_auth import trial_model
+    model = job.get("model") or cron_env_setting("HERMES_MODEL") or ""
     _cron_default_provider = ""
     _cfg: dict = {}
     _model_cfg: Any = {}
     try:
+        from hermes_cli.config_backend import config_exists
         from hermes_cli.config_effective import load_user_config_effective
         _cfg_path = str(_get_hermes_home() / "config.yaml")
-        if os.path.exists(_cfg_path):
+        if config_exists(_cfg_path):
             _cfg = load_user_config_effective(Path(_cfg_path))
             # Coerce null to {} so a falsy default never clobbers a resolved env value.
             _model_cfg = _cfg.get("model") or {}
@@ -2270,34 +2260,20 @@ def _load_cron_job_config(job: dict, job_id: str, job_name: str) -> _CronJobConf
             if isinstance(_cron_cfg_for_model, dict):
                 _cron_default_model = str(_cron_cfg_for_model.get("model") or "").strip()
                 _cron_default_provider = str(_cron_cfg_for_model.get("model_provider") or "").strip()
-            if agent_owns_routing or not job.get("model"):
-                if agent_owns_routing:
-                    if isinstance(_model_cfg, str):
-                        model = _model_cfg
-                    elif isinstance(_model_cfg, dict):
-                        _default = _model_cfg.get("default") or _model_cfg.get("model")
-                        if _default:
-                            model = _default
-                elif _cron_default_model:
+            if not job.get("model"):
+                if _cron_default_model:
                     model = _cron_default_model
                 else:
-                    _, _global_model = resolve_cron_model_drift_defaults(
-                        _cfg, environ={"HERMES_MODEL": cron_env_setting("HERMES_MODEL")})
-                    # Do not feed the creation snapshot in as the live model —
-                    # the later drift guard compares snapshot vs current and
-                    # fail-closes (#44585). Snapshot-as-current would hide drift.
-                    model = _global_model or model
-    except Exception as e:
+                    # The main agent model: ``model: <name>`` shorthand or ``model.default``.
+                    _main = _model_cfg if isinstance(_model_cfg, str) else (
+                        _model_cfg.get("default") or _model_cfg.get("model") or _model_cfg.get("name")
+                        if isinstance(_model_cfg, dict) else "")
+                    model = str(_main or "").strip() or model
+    except Exception as e:  # ConfigBackendUnavailable is not one: run_job fails this fire, never defaults
         logger.warning("Job '%s': failed to load config.yaml, using defaults: %s", job_id, e)
-
-    # Fail fast: an empty model otherwise reaches the provider as an opaque 400.
-    # See #23979.
-    if not (isinstance(model, str) and model.strip()):
-        if agent_owns_routing:
-            raise RuntimeError(
-                f"Evolution cron job '{job_name}' has no model configured in "
-                "config.yaml. Set a default with `hermes model <name>`."
-            )
+    model = (model if isinstance(model, str) else "").strip() or trial_model()
+    # Fail fast: an empty model otherwise reaches the provider as an opaque 400 (#23979).
+    if not model:
         raise RuntimeError(
             f"Cron job '{job_name}' has no model configured "
             f"(job.model={job.get('model')!r}, "
@@ -2529,9 +2505,11 @@ def _init_cron_mcp_tools(job_id: str) -> None:
 
 
 def _open_cron_session_db(job: dict):
-    """Open the SQLite session store under its own timeout (HERMES_CRON_TIMEOUT only watches
-    run_conversation). A wedged sqlite3.connect returns None (no session store) instead of
-    wedging the worker thread."""
+    """Bound store acquisition separately from the conversation watchdog.
+
+    Canonical runs borrow the owner's exact store and fail closed on acquisition
+    errors. Only the legacy non-owner helper path may return no session store.
+    """
     # Initialize the SQLite session store so cron job messages are persisted and discoverable via
     # session_search (same pattern as gateway/run.py) — only now, after every early-return path (wake-gate,
     # prompt validation, drift skip) has passed, so a gated run never opens state.db just to abandon the
@@ -2540,17 +2518,34 @@ def _open_cron_session_db(job: dict):
     # no timeout of its own against a wedged sqlite3.connect (e.g. a stale flock left by a crashed sibling
     # process). An unbounded hang here would wedge the job's worker thread, so the init is bounded and a
     # timeout proceeds without a session store instead of blocking the run forever.
+    from gateway.session_cron import current_execution
+    owner = current_execution()
+    from agent.runtime_session_store import WorkerPersistenceError, is_worker_process
+    if owner is None and is_worker_process():
+        # Do not turn an unsupported worker assignment into the legacy None
+        # fallback: that would run billed inference without durable persistence.
+        raise WorkerPersistenceError('worker_cron_registration_required')
     _session_db_timeout = _get_session_db_timeout()
     try:
         from hermes_state_registry import acquire
 
+        def acquire_store():
+            if owner is None:
+                return acquire()
+            db = acquire(Path(owner[0].db.db_path))
+            if db is not owner[0].db:
+                from hermes_state_registry import release_or_close
+                release_or_close(db)
+                raise RuntimeError('cron requires the canonical owner store')
+            return db
+
         if _session_db_timeout <= 0:
-            return acquire()
+            return acquire_store()
         _session_db_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         # Copy the context so a profile run resolves ITS OWN home/state.db on the worker thread
         # instead of the process-global default.
         _session_db_context = contextvars.copy_context()
-        _session_db_future = _session_db_pool.submit(_session_db_context.run, acquire)
+        _session_db_future = _session_db_pool.submit(_session_db_context.run, acquire_store)
         try:
             return _session_db_future.result(timeout=_session_db_timeout)
         except concurrent.futures.TimeoutError:
@@ -2566,11 +2561,15 @@ def _open_cron_session_db(job: dict):
             # Abandon a wedged connect() rather than blocking shutdown on it.
             _session_db_pool.shutdown(wait=False)
     except concurrent.futures.TimeoutError:
+        if owner is not None:
+            raise TimeoutError("Canonical cron session store acquisition timed out")
         logger.error(
             "Job '%s': SessionDB init did not return within %.0fs — proceeding "
             "without a session store for this run instead of blocking it forever",
             job.get("id", "?"), _session_db_timeout)
     except Exception as e:
+        if owner is not None:
+            raise
         logger.debug("Job '%s': SQLite session store not available: %s", job.get("id", "?"), e)
     return None
 
@@ -2598,10 +2597,12 @@ def _raise_inactivity_timeout(agent, job_name: str, limit_s: float) -> None:
 
 def _run_agent_with_watchdog(
     agent, prompt: str, job: dict, job_id: str, job_name: str, task_id: str, cancel_event,
-    worker_state: Optional[dict] = None,
+    worker_state: Optional[dict] = None, cron_session_id: str = "",
 ) -> dict:
     """Run ``agent.run_conversation`` on a worker thread under the inactivity (not wall-clock)
-    watchdog: default 600s, override HERMES_CRON_TIMEOUT, 0 = unlimited."""
+    watchdog: ``cron.inactivity_timeout_seconds`` (default 900) overridden by
+    ``HERMES_CRON_TIMEOUT``; 0 = unlimited. Drains that run's background delegations before
+    returning or raising, so a cron session never orphans subagent work (#1200)."""
     _cron_timeout = _cron_inactivity_seconds()
     _cron_inactivity_limit = _cron_timeout if _cron_timeout > 0 else None
     _POLL_INTERVAL = 5.0
@@ -2621,9 +2622,10 @@ def _run_agent_with_watchdog(
     def _abort_if_fire_claim_lost() -> None:
         if cancel_event is None or not cancel_event.is_set():
             return
+        reason = cancel_reason(cancel_event)
         if agent is not None and hasattr(agent, "interrupt"):
-            agent.interrupt("Cron fire claim ownership was lost")
-        raise RuntimeError(f"Cron job '{job_name}' lost its durable fire claim ownership")
+            agent.interrupt(f"Cron run stopped: {reason}")
+        raise RuntimeError(f"Cron job '{job_name}' was stopped: {reason}")
 
     def _heartbeat_run_claim_if_due():
         nonlocal _last_claim_heartbeat
@@ -2723,6 +2725,8 @@ def _run_agent_with_watchdog(
     finally:
         _watch_stop.set()
         _cron_pool.shutdown(wait=False, cancel_futures=True)
+        # Drain after the turn ends (or is abandoned) but before finalize/teardown (#1200).
+        _drain_cron_delegations(cron_session_id, job_name)
 
     if _inactivity_timeout:
         _raise_inactivity_timeout(agent, job_name, _cron_inactivity_limit)
@@ -3097,6 +3101,7 @@ class _CronRunScope:
         self._cron_session_var = _VAR_MAP["HERMES_CRON_SESSION"]
         self._cron_session_token = None
         self._non_dispatcher_token = None
+        self._spend_token = None
 
     def enter(self) -> None:
         # Scope cron approval policy; exit() RESETS via token (pinning "" would suppress the legacy
@@ -3107,6 +3112,9 @@ class _CronRunScope:
         # ContextVar, NOT an os.environ clear (env is shared with the worker heartbeat and
         # concurrent jobs); copy_context() carries it into the agent thread.
         self._non_dispatcher_token = enter_non_dispatcher_owned_context()
+        # Each run is its own MCP spend "chat" (its approval session key is "" for every job).
+        from tools.mcp_tool_costs import bind_run
+        self._spend_token = bind_run(self.task_id)
 
     def exit(self) -> None:
         from gateway.session_context import clear_session_vars
@@ -3118,6 +3126,9 @@ class _CronRunScope:
             self._cron_session_var.reset(self._cron_session_token)
         if self._non_dispatcher_token is not None:
             exit_non_dispatcher_owned_context(self._non_dispatcher_token)
+        if self._spend_token is not None:
+            from tools.mcp_tool_costs import unbind_run
+            unbind_run(self._spend_token)
         for name in _CRON_DELIVERY_VARS:
             self._var_map[name].set("")
 
@@ -3433,56 +3444,43 @@ def _run_job_impl(
     ``extra_prompt``: optional per-run context from ``cronjob(action='run', prompt=...)`` (#57331). Appended
     to the stored prompt for this fire only — never persisted to the job definition.
     """
-    job_id = job["id"]
-    job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
-
-    from cron.decision_ledger import preflight
-    if (decision_error := preflight(job)) is not None:
-        return False, "", "", decision_error
-
-    early, prompt = _prepare_job_prompt(job, job_id, job_name, extra_prompt, cancel_event)
-    if early is not None:
-        return early
-
-    # Halt-state gate (#913): scripts/evolution_funnel.py writes
-    # halt-state.txt once the pipeline has produced zero merged PRs for
-    # 5+ consecutive cycles AND zero selections for 3+ consecutive
-    # cycles. Checked here, before SessionDB/AIAgent construction.
+    # Halt-state gate (#913): scripts/evolution_funnel.py writes halt-state.txt once
+    # the pipeline has produced zero merged PRs for 5+ consecutive cycles AND zero
+    # selections for 3+ cycles. A structurally halted pipeline must skip its
+    # expensive stage crons before any transport hop, provider ping or agent build.
     from cron import evolution_preflight
 
-    stage: Optional[str] = None
-    halted_for_gate = False
+    _halt_stage: Optional[str] = None
+    _halted_for_gate = False
     try:
-        stage = evolution_preflight.evolution_job_stage(job)
-        halted_for_gate = bool(stage) and evolution_preflight.should_skip_for_halt(
-            stage, _get_hermes_home()
+        _halt_stage = evolution_preflight.evolution_job_stage(job)
+        _halted_for_gate = bool(_halt_stage) and evolution_preflight.should_skip_for_halt(
+            _halt_stage, _get_hermes_home()
         )
     except Exception as exc:  # pragma: no cover - defense in depth
         logger.debug(
-            "Job '%s': halt-state gate classification failed, proceeding "
-            "without it: %s",
-            job_id,
-            exc,
+            "Job '%s': halt-state gate classification failed, proceeding without it: %s",
+            job.get("id"), exc,
         )
-        stage = None
-        halted_for_gate = False
+        _halt_stage = None
+        _halted_for_gate = False
 
-    if halted_for_gate:
+    if _halted_for_gate:
+        _halt_job_id = job["id"]
+        _halt_job_name = str(job.get("name") or job.get("prompt") or _halt_job_id or "cron job")
         logger.info(
-            "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is "
-            "halted (halt-state.txt present). No LLM agent was spawned. "
-            "The pipeline resumes automatically once the funnel job "
-            "clears the halt (merged/selected recover), or the file can "
-            "be removed manually.",
-            job_id,
-            stage,
+            "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is halted "
+            "(halt-state.txt present). No LLM agent was spawned. The pipeline resumes "
+            "automatically once the funnel job clears the halt (merged/selected recover), "
+            "or the file can be removed manually.",
+            _halt_job_id,
+            _halt_stage,
         )
-        now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
-        silent_doc = (
-            f"# Cron Job: {job_name}\n\n"
-            f"**Job ID:** {job_id}\n"
-            f"**Run Time:** {now_iso}\n"
-            f"**Status:** silent (evolution pipeline halted)\n\n"
+        _halt_doc = (
+            f"# Cron Job: {_halt_job_name}\n\n"
+            f"**Job ID:** {_halt_job_id}\n"
+            f"**Run Time:** {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "**Status:** silent (evolution pipeline halted)\n\n"
             "The evolution pipeline is halted (zero merged PRs for 5+ "
             "cycles and zero selections for 3+ cycles — see "
             "scripts/evolution_funnel.py). This expensive LLM stage was "
@@ -3490,11 +3488,33 @@ def _run_job_impl(
             "pipeline. `funnel` keeps running and will clear the halt "
             "automatically once metrics recover.\n"
         )
-        return True, silent_doc, SILENT_MARKER, None
+        return True, _halt_doc, SILENT_MARKER, None
 
+    from gateway.session_cron import current_execution
+    owner_execution = current_execution()
+    if owner_execution is not None and owner_execution[2:] != (job['id'], execution_id):
+        owner_execution = None
+    if not job.get("no_agent") and owner_execution is None:
+        from cron.scheduler_authority import run_canonical_job
+        return run_canonical_job(job, extra_prompt=extra_prompt, cancel_event=cancel_event,
+                                 execution_id=execution_id)
+    job_id = job["id"]
+    job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+
+    # Decision ledger fence (#3474): a deferred plan whose recorded premises changed
+    # must not reach scripts, monitors or an agent. Persist the reopened state here,
+    # before any preparation, so a rerun cannot slip past a stale snapshot.
+    from cron.decision_ledger import preflight as _decision_preflight
+    if (decision_error := _decision_preflight(job)) is not None:
+        return False, "", "", decision_error
+
+    early, prompt = _prepare_job_prompt(job, job_id, job_name, extra_prompt, cancel_event)
+    if early is not None:
+        return early
     from run_agent import AIAgent
 
-    _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
+    _cron_session_id = (owner_execution[1] if owner_execution is not None else
+                        f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}")
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)
     logger.info("Prompt: %s", prompt[:100])
 
@@ -3546,7 +3566,10 @@ def _run_job_impl(
 
         result = _run_agent_with_watchdog(
             agent, prompt, job, job_id, job_name, scope.task_id, cancel_event,
-            worker_state=_worker_state)
+            worker_state=_worker_state, cron_session_id=_cron_session_id)
+        # #701: carry this run's tool-call count to the terminal booking so the job
+        # record can tell a legitimately idle stage from a silently no-op'd one.
+        job["_last_run_tool_calls"] = _count_tool_calls(result.get("messages"))
         final_response = _final_response_from_result(result, job_id, job_name, AIAgent, agent=agent)
         if (setup.fallback_notice and final_response.strip() and not _is_cron_silence_response(final_response)
                 and _cron_failure_marker_error(final_response) is None):
@@ -3568,7 +3591,7 @@ def _run_job_impl(
         _audit.write(dict(result, response_silent=_is_cron_silence_response(final_response or "")), None)
         return True, output, final_response, None
 
-    except Exception as e:
+    except (Exception, ConfigBackendUnavailable) as e:  # the plane being down fails THIS fire only
         error_msg = f"{type(e).__name__}: {e!s}"
         logger.exception("Job '%s' failed: %s", job_name, error_msg)
         # Cowork-style unreachable-model re-run (cron/unreachable_retry.py): flag failures where
@@ -3664,7 +3687,7 @@ def _run_with_fire_claim_heartbeat(job: dict, run) -> bool:
         if not execution_id:
             return
         try:
-            finish_execution(execution_id, success=False, error=error)
+            finish_lost_execution(execution_id, error)
         except Exception:
             logger.warning(
                 "Job '%s': failed to close unstarted execution ledger row",
@@ -3857,31 +3880,8 @@ def _record_fire_ownership_lost(
         )
         finish_execution(execution_id, success=False, error=_OWNERSHIP_LOST_INTERRUPTED)
     else:
-        finish_execution(
-            execution_id, success=False,
-            error="Fire claim ownership lost; stale result was discarded.")
-
-
-def _classify_delivery_outcome(
-    *, delivery_error, should_deliver: bool, unresolved_origin: bool,
-    normalized_deliver: str, incident_acked: bool, success: bool,
-    delivery_queued=None, notification_suppressed: bool = False,
-) -> str:
-    if delivery_error:
-        return "failed"
-    if should_deliver and delivery_queued:
-        return "queued"
-    if notification_suppressed:
-        return "suppressed"
-    if should_deliver and unresolved_origin:
-        return "not_configured"
-    if should_deliver and normalized_deliver != "local":
-        return "delivered"
-    if incident_acked and not success:
-        # Failure ping withheld for a known signature: operator acked it, or it was already
-        # alerted inside the reminder cooldown (vs. plain "suppressed").
-        return "suppressed_acked"
-    return "suppressed"
+        finish_lost_execution(
+            execution_id, "Fire claim ownership lost; stale result was discarded.")
 
 
 def _compose_run_delivery(
@@ -3977,6 +3977,7 @@ class _FireOwnership:
     def __init__(
         self, job: dict, claim_lost: Optional[_CancelEventLike] = None,
         transport_cancel: Optional[_CancelEventLike] = None,
+        operator_cancel: Optional[_CancelEventLike] = None,
     ):
         self.job = job
         # Two handles: the heartbeat's raw ``lost_ownership`` event and the caller's transport
@@ -3984,16 +3985,23 @@ class _FireOwnership:
         # ``set()`` would propagate into the transport event this run does not own (#105861).
         self.claim_lost = claim_lost
         self.transport_cancel = transport_cancel
-        # What ``run_job`` receives as its ``cancel_event``: either source cancels the run.
+        self.operator_cancel = operator_cancel
+        # ``operator_cancel`` (``hermes cron cancel``) is a THIRD source, deliberately not folded
+        # into ``transport_cancel``: only a transport cancel counts as claim loss for bookkeeping,
+        # while an operator cancel is a real outcome this run records itself.
+        # What ``run_job`` receives as its ``cancel_event``: any source cancels the run.
         self.cancel_event: Optional[_CancelEventLike] = (
-            _CombinedCancelEvent(claim_lost, transport_cancel)
-            if claim_lost is not None or transport_cancel is not None
+            _CombinedCancelEvent(claim_lost, transport_cancel, operator_cancel)
+            if claim_lost is not None or transport_cancel is not None or operator_cancel is not None
             else None)
         claim = job.get("fire_claim")
         self.owner = str(claim.get("by") or "") if isinstance(claim, dict) else None
 
     def transport_cancelled(self) -> bool:
         return self.transport_cancel is not None and self.transport_cancel.is_set()
+
+    def operator_cancelled(self) -> bool:
+        return self.operator_cancel is not None and self.operator_cancel.is_set()
 
     def side_effect_fence(self):
         if self.owner is None:
@@ -4109,6 +4117,26 @@ def _save_compose_deliver(
         _normalize_deliver_value(_delivery_lane_value(job, for_failure=not d.success)) == "origin"
         and not _resolve_delivery_targets(job, for_failure=not d.success)
     )
+    execution_id = job.get('execution_id')
+    if execution_id and not job.get('no_agent'):
+        from cron.delivery_queue import enqueue
+        # Nothing to send: an origin-less job is ``not_configured``, never a queued "delivery".
+        if d.unresolved_origin or _normalize_deliver_value(
+                _delivery_lane_value(job, for_failure=not d.success)) == "local":
+            return
+        queued_job = dict(job)
+        if d.failure_incident_id:
+            queued_job["_failure_incident_id"] = d.failure_incident_id
+        # The queue row IS the send: publish it under the same fence as a direct send, so a claim
+        # stolen after the lost() sample above cannot leave this stale fire's notice queued.
+        with fence.side_effect_fence() as owns_delivery:
+            if not owns_delivery:
+                raise _FireClaimLostDuringSideEffect
+            queued = enqueue(execution_id, queued_job, deliver_content, for_failure=not d.success)
+            # The queue owns this send even if subsequent bookkeeping fails.
+            d.delivery_attempted = True
+        job['last_delivery_queued'] = {'canonical': {'status': queued['status'], 'execution_id': execution_id}}
+        return
     try:
         with fence.side_effect_fence() as owns_delivery:
             if not owns_delivery:
@@ -4128,105 +4156,6 @@ def _save_compose_deliver(
             raise
         d.delivery_error = str(de)
         logger.error("Delivery failed for job %s: %s", job["id"], de)
-
-
-def _finish_interrupted_run(job: dict, execution_id: str, delivery_error: Optional[str]) -> None:
-    """Shutdown already wrote last_status, so mark_job_run is skipped (a second call would skip a
-    fire or auto-delete the job); an unsent notice is recorded via update_job instead."""
-    if delivery_error:
-        try:
-            # The gateway shutdown already wrote last_status for this run, so mark_job_run is skipped below
-            # — but it could not know that the notice we just tried to send never left the process (the
-            # adapters were torn down first, #82232). Record the delivery failure on its own via update_job:
-            # mark_job_run also advances next_run_at and the repeat counter, and running that a second time
-            # for one run would skip a fire or auto-delete the job early.
-            from cron.jobs import update_job
-            update_job(job["id"], {"last_delivery_error": delivery_error})
-        except Exception as _rec_err:
-            logger.debug(
-                "Failed recording delivery_error for interrupted job %s: %s", job["id"], _rec_err)
-    finish_execution(
-        execution_id, success=False,
-        error="Interrupted by gateway shutdown before terminal completion.")
-
-
-def _finish_completed_run(d: _RunDelivery, fire_owner: Optional[str], execution_id: str) -> bool:
-    """mark_job_run (owner-fenced) + execution ledger row for a run that reached delivery."""
-    job = d.job
-    # Persist a failure record ONLY when a job fails or the agent returns an
-    # empty response. This is the per-job audit trail that makes silent
-    # failures visible. Successful runs used to overwrite the latest record
-    # so the digest only showed current problems, but in practice this
-    # flooded failures/ with success=true records (~100 of ~109 files),
-    # making the directory useless for identifying real failures (#1390).
-    # build_cron_failure_digest() already filters on success=False, so
-    # writing success records here served no purpose.
-    if not d.success:
-        try:
-            from cron.jobs import save_job_failure
-            save_job_failure(
-                job,
-                success=False,
-                error=d.error,
-                output=(d.output or ""),
-            )
-            logger.warning("Job '%s' failure record saved to cron/failures", job.get("id"))
-        except Exception as _fe:
-            logger.error("Could not save cron failure record: %s", _fe)
-
-    if not d.should_deliver and job.get("last_delivery_queued"):
-        from cron.jobs import update_job
-        update_job(job["id"], {"last_delivery_queued": None})
-        job["last_delivery_queued"] = None
-    mark_kwargs: dict = {"delivery_error": d.delivery_error}
-    if not d.success and job.pop("_model_unreachable", False):
-        # Never-reached-the-model failure: schedule the Cowork-style bounded re-run
-        # (cron/unreachable_retry.py) inside the same fenced store write.
-        mark_kwargs["model_unreachable"] = True
-    from cron.unreachable_retry import is_retry_run
-    if is_retry_run(job):
-        # A re-run of an occurrence that already counted: must not spend another repeat slot.
-        mark_kwargs["ladder_rung"] = True
-    _hold_s = job.pop("_quota_hold_seconds", None)
-    if not d.success and _hold_s:
-        # Provider window closed for a known duration: park past it (cron/quota_hold.py, #89376).
-        mark_kwargs["quota_hold_seconds"] = _hold_s
-        mark_kwargs["recover_consumed_fire"] = bool(job.get("_scheduled_instant"))
-    if d.success and not d.delivery_error and d.should_deliver and job.get("last_delivery_queued"):
-        mark_kwargs["status"] = "delivery_queued"
-    if fire_owner is not None:
-        mark_kwargs["expected_fire_owner"] = fire_owner
-    if d.blocked_config:
-        mark_kwargs["status"] = "blocked_config"
-    elif d.balance_low:
-        mark_kwargs["status"] = "balance_low"
-    elif d.drift_skip:
-        mark_kwargs["status"] = "drift_skip"
-    # A run that removed its own record has nothing left to mark; the delivery above is its result.
-    marked = self_removal_delivery_allowed(job["id"]) or mark_job_run(
-        job["id"], d.success, d.error, **mark_kwargs)
-    if fire_owner is not None and not marked:
-        finish_execution(
-            execution_id, success=False,
-            error="Fire claim ownership lost before terminal completion.")
-        return True
-    delivery_outcome = _classify_delivery_outcome(
-        delivery_error=d.delivery_error,
-        delivery_queued=job.get("last_delivery_queued"),
-        notification_suppressed=bool(job.get("_notification_all_targets_suppressed")),
-        should_deliver=d.should_deliver,
-        unresolved_origin=d.unresolved_origin,
-        # Read the lane the notice was actually routed through (failure_deliver on failure).
-        normalized_deliver=_normalize_deliver_value(_delivery_lane_value(job, for_failure=not d.success)),
-        incident_acked=d.incident_acked,
-        success=d.success,
-    )
-    if delivery_outcome in ("delivered", "not_configured") and not d.success:
-        # Failure ping left the process (or had a configured target): mark the incident alerted.
-        _mark_incident_alerted(d.failure_incident_id)
-    finish_execution(
-        execution_id, success=d.success, error=d.error, delivery_outcome=delivery_outcome)
-    return True
 
 
 def _deliver_crash_failure(
@@ -4283,14 +4212,14 @@ def _install_fire_secret_scope() -> tuple[contextvars.Token, Optional[contextvar
     here rather than at the tick means no read is ever fail-closed without a scope to read — the
     restart-safe handoff in ``run_one_job`` runs before this and keeps today's semantics (#107692).
     """
-    from agent.secret_scope import (
-        build_profile_secret_scope, set_multiplex_context, set_secret_scope)
+    from agent.secret_scope import set_multiplex_context, set_secret_scope
     from cron.scheduler_provider import routed_profile_fire
     from hermes_cli.env_loader import hydrate_profile_secret_sources
+    from tui_gateway.launch_profile_policy import owner_secret_scope
 
     home = Path(_get_hermes_home())
     hydrate_profile_secret_sources(home)
-    scope_token = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
+    scope_token = set_secret_scope(owner_secret_scope(home), profile_home=str(home))
     context_token = set_multiplex_context(True) if routed_profile_fire() else None
     return scope_token, context_token
 
@@ -4326,21 +4255,37 @@ def _start_owned_run(job: dict, execution_id: str) -> Optional[contextvars.Token
     return enter_cron_execution(job, execution_id, record or {})
 
 
+def _apply_agent_failure_marker(job: dict, success: bool, error, final_response):
+    """An agent can finish its own turn after a delegated child has failed. Let it explicitly
+    declare that semantic failure so the existing failure path updates status, streaks, ledger,
+    and notification routing instead of recording a false healthy result.
+
+    Returns ``(success, error, agent_declared)``."""
+    if success and not job.get("no_agent"):
+        marker_error = _cron_failure_marker_error(final_response)
+        if marker_error is not None:
+            return False, marker_error, True
+    return success, error, False
+
+
 def _run_one_job_body(
     job: dict, *, adapters=None, loop=None, verbose: bool = False,
     extra_prompt: Optional[str] = None, claim_lost: Optional[_CancelEventLike] = None,
     transport_cancel: Optional[_CancelEventLike] = None,
     execution_token: Optional[object] = None,
 ) -> bool:
-    fence = _FireOwnership(job, claim_lost, transport_cancel)
-    fire_owner = fence.owner
-    _side_effect_fence = fence.side_effect_fence
-    _fire_claim_ownership_lost = fence.lost
-
     execution_id = job.get("execution_id")
     if not execution_id:
         execution_id = create_execution(
             job["id"], source="direct", scheduled_instant=job.get("_scheduled_instant"))["id"]
+    job = dict(job, execution_id=execution_id)
+    # The execution id is resolved BEFORE the fence so ``hermes cron cancel`` can join the same
+    # cancel seam: the marker it writes is polled by whichever process owns this attempt.
+    fence = _FireOwnership(job, claim_lost, transport_cancel, CancelRequest(execution_id))
+    fire_owner = fence.owner
+    _side_effect_fence = fence.side_effect_fence
+    _fire_claim_ownership_lost = fence.lost
+
     delivery_attempted = False
     delivery_error = None
 
@@ -4403,29 +4348,18 @@ def _run_one_job_body(
             "execution_id": execution_id}
         if fence.cancel_event is not None:
             _run_kwargs["cancel_event"] = fence.cancel_event
-        try:
-            success, output, final_response, error = run_job(job, **_run_kwargs)
-        except BaseException:
-            # run_job hands back the agent even when raising; tear down so a failed run never leaks.
-            # BaseException so KeyboardInterrupt/SystemExit mid-run still trigger teardown.
-            _teardown_deferred()
-            raise
-        finally:
-            _job_tool_calls = _LAST_RUN_TOOL_CALLS.pop(job["id"], None)
+        outcome = _run_job_unless_cancelled(
+            run_job, job, _run_kwargs, _teardown_deferred, fence, execution_id, fire_owner)
+        if outcome is None:  # an operator cancel stopped it and is already booked
+            return True
+        success, output, final_response, error = outcome
 
         if _fire_claim_ownership_lost():
             _teardown_deferred()
             _record_fire_ownership_lost(job, fire_owner, execution_id)
             return True
 
-        # An agent can finish its own turn after a delegated child has failed. Let it explicitly
-        # declare that semantic failure so the existing failure path updates status, streaks,
-        # ledger, and notification routing instead of recording a false healthy result.
-        agent_declared = False
-        if success and not job.get("no_agent"):
-            marker_error = _cron_failure_marker_error(final_response)
-            if marker_error is not None:
-                success, error, agent_declared = False, marker_error, True
+        success, error, agent_declared = _apply_agent_failure_marker(job, success, error, final_response)
 
         # Agent is still live through delivery; wrap ALL of save/compose/deliver in try/finally so a
         # raise anywhere still tears the deferred agent down.
@@ -4446,15 +4380,13 @@ def _run_one_job_body(
             _record_fire_ownership_lost(job, fire_owner, execution_id)
             return True
 
-        # Empty final_response is a soft failure so last_status is not "ok".
-        if d.success and not final_response.strip():
-            d.success = False
-            d.error = "Agent completed but produced empty response (model error, timeout, or misconfiguration)"
+        from cron.scheduler_bookkeeping import fail_empty_response
+        fail_empty_response(d, final_response)
 
         if _fire_claim_ownership_lost():
             # #105861: the claim check is one sample; a miss AFTER a completed delivery must not
             # overwrite the delivered run's terminal status — ok, or a failure whose notice already
-            # left with its real error — so fall through to _finish_completed_run, whose owner-fenced
+            # left with its real error — so fall through to finish_completed_run, whose owner-fenced
             # mark_job_run is authoritative either way. An explicit transport cancel stays fail-closed.
             transport_cancelled = fence.transport_cancelled()
             if d.delivery_attempted and not d.delivery_error and not transport_cancelled:
@@ -4472,12 +4404,22 @@ def _run_one_job_body(
                 return True
 
         if _consume_interrupted_flag(job["id"], execution_token):
-            _finish_interrupted_run(job, execution_id, delivery_error)
+            from cron.scheduler_bookkeeping import finish_interrupted_run
+            finish_interrupted_run(job, execution_id, delivery_error)
             return True
 
-        return _finish_completed_run(d, fire_owner, execution_id)
+        from cron.scheduler_bookkeeping import finish_completed_run
+        return finish_completed_run(d, fire_owner, execution_id)
 
     except BaseException as e:
+        from cron.scheduler_authority import CronExecutionUnknown
+        if isinstance(e, CronExecutionUnknown):
+            from cron.executions import give_up_execution
+            from cron.scheduler_authority import pause_for_unknown
+            pause_for_unknown(job["id"], execution_id, str(e))
+            give_up_execution(execution_id, reason=str(e))
+            logger.error("Cron %s paused with unverified admission: %s", job["id"], e)
+            return False
         # BaseException, not Exception: CancelledError/KeyboardInterrupt/SystemExit propagate here.
         # Without mark_job_run(False) a finite one-shot is wedged: claim_dispatch consumed
         # repeat.completed but last_run_at is never written. Record first, then re-raise
@@ -4490,6 +4432,8 @@ def _run_one_job_body(
         # and no error. Owner fencing still applies: a stale worker must not record over a replacement claim
         # owner.
         _err_text = str(e) or type(e).__name__
+        # A config backend outage (a SystemExit by design) fails this fire, never the ticker.
+        contained = isinstance(e, (Exception, ConfigBackendUnavailable))
         logger.error(
             "Error processing job %s: %s",
             job["id"],
@@ -4499,7 +4443,7 @@ def _run_one_job_body(
         # Owner fencing: a stale worker whose claim was taken over (or transport-cancelled) must not
         # send a failure alert on top of the replacement run's; fall through to fenced bookkeeping.
         if (
-            isinstance(e, Exception)
+            contained
             and not delivery_attempted
             and not isinstance(e, _FireClaimLostDuringSideEffect)
             and not _fire_claim_ownership_lost()
@@ -4514,7 +4458,7 @@ def _run_one_job_body(
                 mark_kwargs = {}
                 if fire_owner is not None:
                     mark_kwargs["expected_fire_owner"] = fire_owner
-                if isinstance(e, Exception):
+                if contained:
                     mark_kwargs["delivery_error"] = delivery_error
                 from cron.unreachable_retry import is_retry_run
                 if is_retry_run(job):
@@ -4529,12 +4473,15 @@ def _run_one_job_body(
                 execution_id, success=False, error=_err_text, delivery_outcome=delivery_outcome)
         except Exception as record_err:
             logger.error("Failed to finish execution record for job %s: %s", job["id"], record_err)
-        if not isinstance(e, Exception):
+        if not contained:
             raise
         return False
     finally:
         # Function-level on purpose: must scope delivery, deferred teardown, claim-loss handling and
         # bookkeeping — not just run_job. Do not move into the run block's finally.
+        # The attempt is over either way, so its cancel marker goes with it — an unread marker
+        # would otherwise sit in the cancels dir until the TTL prune.
+        clear_cancel(execution_id)
         exit_cron_execution(_identity_token)
         if _fire_scope_tokens is not None:
             _reset_fire_secret_scope(_fire_scope_tokens)
@@ -4585,7 +4532,7 @@ def _wait_for_external_cron_worker_body(
         # read and wait(). Re-read the exact attempt before declaring that
         # it died without terminalizing.
         current = get_execution(execution_id)
-        if current and current.get("status") in ("completed", "failed"):
+        if current and current.get("status") in FIRER_FINISHED_STATES:
             return True
         # If the adopted worker died without terminalizing, its owner is
         # now provably gone. Recover to ``unknown`` rather than routing the
@@ -4607,7 +4554,7 @@ def _wait_for_external_cron_worker_body(
             # A concurrent sweep may have won the unknown transition. Still
             # surface this waiter's exit code and stderr instead of discarding them.
             current = get_execution(execution_id)
-            if current and current.get("status") in ("completed", "failed"):
+            if current and current.get("status") in FIRER_FINISHED_STATES:
                 return True
         stderr_tail = ""
         if stderr_path is not None:
@@ -4806,6 +4753,7 @@ def _launch_external_cron_worker(job: dict) -> bool:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_fd,
+                # detached-spawn: ok — restart-safe cron worker, must survive a gateway restart (#101940)
                 start_new_session=True,
                 creationflags=windows_hide_flags(),
             )
@@ -5102,14 +5050,19 @@ _last_dead_owner_reap_at: dict[str, float] = {}
 
 # Worktree prune throttle: the cron tick is the only reliably periodic process on gateway boxes.
 _WORKTREE_MAINTENANCE_INTERVAL_SECONDS = 6 * 3600.0
-_last_worktree_maintenance_at: Optional[float] = None
+_last_worktree_maintenance_at: Optional[dict] = None  # profile home -> monotonic stamp
 _worktree_maintenance_lock = threading.Lock()
 
 
 def _worktree_maintenance_repos() -> list[str]:
-    """Repos whose ``.worktrees/`` to keep pruned: the hermes checkout plus job workdir repo roots,
-    filtered to those that actually have a ``.worktrees/`` dir."""
+    """Repos whose ``.worktrees/`` to keep pruned: the hermes checkout, job workdir repo roots and
+    every repo this profile created a worktree in (``worktree_registry``), filtered to those that
+    actually have a ``.worktrees/`` dir."""
     repos: set = set()
+
+    with contextlib.suppress(Exception):
+        from hermes_cli.worktree_registry import registered_repos
+        repos.update(registered_repos())
 
     # Hermes source checkout (git installs only; wheel installs have no .git).
     with contextlib.suppress(Exception):
@@ -5139,35 +5092,32 @@ def _worktree_maintenance_repos() -> list[str]:
 
 def _maybe_run_worktree_maintenance() -> None:
     """Throttled worktree prune from the cron tick, on a daemon thread so the tick never waits on
-    git. Same conservative pruner as ``hermes -w`` startup (dirty/unpushed/locked trees untouched).
-    Errors never propagate: GC is hygiene, not scheduling."""
+    git. Same pruner as ``hermes -w`` startup (idle dirty/unpushed trees archived before removal,
+    live trees untouched). Discovery is throttled per profile home, the prune once per repo across
+    served profiles, and ``cron.scheduler_worktree_maintenance`` runs one sweep at a time per
+    process. Runs in a copy of the caller's context (profile-home override); never raises."""
     global _last_worktree_maintenance_at
+    import contextvars
+
+    from hermes_constants import get_hermes_home
+
+    home = str(get_hermes_home())
     now = time.monotonic()
     with _worktree_maintenance_lock:
-        if (
-            _last_worktree_maintenance_at is not None
-            and now - _last_worktree_maintenance_at
-            < _WORKTREE_MAINTENANCE_INTERVAL_SECONDS
-        ):
+        stamps = _last_worktree_maintenance_at or {}
+        last = stamps.get(home)
+        if last is not None and now - last < _WORKTREE_MAINTENANCE_INTERVAL_SECONDS:
             return
-        _last_worktree_maintenance_at = now
+        _last_worktree_maintenance_at = {**stamps, home: now}
 
     def _run() -> None:
-        try:
-            repos = _worktree_maintenance_repos()
-            if not repos:
-                return
-            from hermes_cli.worktree_ops import _prune_stale_worktrees
+        from cron.scheduler_worktree_maintenance import run_sweep
 
-            for repo in repos:
-                try:
-                    _prune_stale_worktrees(repo)
-                except Exception:
-                    logger.debug("Cron worktree maintenance failed for %s", repo, exc_info=True)
-        except Exception:
-            logger.debug("Cron worktree maintenance skipped", exc_info=True)
+        run_sweep(_worktree_maintenance_repos,
+                  interval_seconds=_WORKTREE_MAINTENANCE_INTERVAL_SECONDS)
 
-    threading.Thread(target=_run, name="cron-worktree-prune", daemon=True).start()
+    threading.Thread(target=contextvars.copy_context().run, args=(_run,), name="cron-worktree-prune",
+                     daemon=True).start()
 
 
 def _acquire_tick_lock(lock_file):
@@ -5450,7 +5400,10 @@ from cron.scheduler_tick import tick
 # ---------------------------------------------------------------------------
 from cron.scheduler_delivery import (
     _deliver_result, _delivery_lane_value, _normalize_deliver_value, _resolve_delivery_target,
-    _resolve_delivery_targets, _resolve_origin,
+    _resolve_delivery_targets,
+    # Re-exported for the fork's tests, which patch ``cron.scheduler._resolve_origin``
+    # (the delivery split moved the definition into scheduler_delivery).
+    _resolve_origin,
 )
 from cron.scheduler_script import (
     _get_session_db_timeout, _run_job_script, _run_job_script_with_claim_heartbeat, _start_heartbeat_thread,
@@ -5458,15 +5411,21 @@ from cron.scheduler_script import (
 from cron.scheduler_prompt import (
     _PROMPT_FRAME, _PROMPT_HEADING, _PROMPT_SEPARATOR, _RESPONSE_FRAME, _RESPONSE_HEADING,
     _RESPONSE_TERMINATOR, _block_and_pause_job, _build_job_prompt, _guard_job_credential_exfil,
-    _parse_wake_gate, _scan_assembled_cron_prompt,
+    _job_doc_header, _parse_wake_gate,
+    # Same reason: the cron prompt-injection tests patch the prompt scanner here.
+    _scan_assembled_cron_prompt,
 )
 from cron.scheduler_preflight import (
-    BLOCKED_CONFIG_MARKER, BLOCKED_CONFIG_SILENT_MARKER,
     BALANCE_LOW_MARKER, BALANCE_LOW_SILENT_MARKER,
-    _cron_preflight_enabled, _empty_requested_mcp_toolsets,
-    _is_transient_provider_resolve_error, _preflight_job_config,
-    _preflight_check_provider_key, _preflight_check_provider_balance,
+    BLOCKED_CONFIG_MARKER, BLOCKED_CONFIG_SILENT_MARKER, _cron_preflight_enabled,
+    _empty_requested_mcp_toolsets, _is_transient_provider_resolve_error, _preflight_job_config,
+    _preflight_check_provider_balance, _preflight_check_provider_key,
 )
+
+
+DRIFT_SKIP_SILENT_MARKER = "[drift_skip:silent]"
+
+
 
 
 # `python -m cron.scheduler` entry: MUST stay below the split-module imports so the worker /
@@ -5493,4 +5452,4 @@ if __name__ == "__main__":
         raise SystemExit(
             0 if _run_external_worker_payload(args.external_worker_file, args.ack_file) else 1
         )
-    tick(verbose=True)
+    tick(verbose=True, headless=True)

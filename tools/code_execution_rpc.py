@@ -17,6 +17,7 @@ import time
 
 from agent.thread_scoped_output import thread_scoped_silence
 from tools.registry import tool_error
+from tools.tool_circuit_breaker import strip_diagnostic
 
 # Logger name kept as the origin module's so existing log expectations hold.
 logger = logging.getLogger("tools.code_execution_tool")
@@ -59,7 +60,7 @@ def _remote_write(env, remote_path: str, content: str, *, atomic: bool = False,
     (``check=True`` raises on failure via _execute_checked).
 
     The base64 payload always travels as ``stdin_data``: pipe-mode backends
-    (ssh, docker, local, singularity: the real shared-host ones) deliver it on
+    (ssh, docker, local: the real shared-host ones) deliver it on
     real stdin, so it never enters argv where a co-tenant can read it via
     ``/proc/*/cmdline``; ``BaseEnvironment.execute`` embeds it as a heredoc
     for heredoc-mode backends (modal, daytona, vercel), and managed_modal
@@ -107,6 +108,9 @@ def _handle_rpc_request(request: dict, *, allowed_tools: frozenset, tool_call_co
     except Exception as exc:
         logger.error("Tool call failed in %s: %s", where, exc, exc_info=True)
         result = tool_error(str(exc))
+    # In-script helpers parse this as JSON; the model-facing retry-spiral note
+    # (appended by handle_function_call) would make it "Extra data".
+    result = strip_diagnostic(result)
     tool_call_counter[0] += 1
     entry = {"tool": tool_name, "args_preview": str(tool_args)[:80],
              "duration": round(time.monotonic() - call_start, 2)}

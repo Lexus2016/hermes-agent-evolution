@@ -45,7 +45,12 @@ def _evidence_path(path: str, workdir=None) -> Path:
 def _digest(path: str, workdir=None) -> str:
     # No commands, network probes, devices or unbounded file reads.
     path = _evidence_path(path, workdir)
-    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
+    # The capability belongs to the platform's open, not to whatever wrapper this
+    # process installed: the test harness' home-I/O guard wraps os.open with
+    # functools.wraps, which would otherwise hide dir_fd support and turn every
+    # digest into "unsupported on this platform".
+    _opener = getattr(os.open, "__wrapped__", os.open)
+    if _opener not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
         raise ValueError("descriptor-scoped watch files are unsupported on this platform")
     # Open EVERY component relative to an already-open directory. A concurrent
     # parent swap cannot turn the validated path into an out-of-scope symlink.

@@ -86,22 +86,43 @@ _LOCAL_MODES = {"local", "local_embedded"}
 _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
 
 
-def _ensure_client_dependency() -> None:
-    """Lazily install the Hindsight client (``tools.lazy_deps``) before importing it.
+_CLIENT_MODULES = ("hindsight", "hindsight_client", "hindsight_client_api")
 
-    A caller that already injected ``hindsight`` (embedded runtime) or the
-    client API does not need a pip install. Tests do this; production reaches
-    ensure only when neither module is loaded.
+
+def _client_importable() -> bool:
+    """Whether the Hindsight SDK this mode imports can be loaded right now.
+
+    A module already in ``sys.modules`` counts even when no distribution is
+    installed (an injected embedded runtime, the client API, tests); otherwise
+    an import spec is enough.
     """
-    if "hindsight" in sys.modules or "hindsight_client_api" in sys.modules:
+    if any(name in sys.modules for name in _CLIENT_MODULES):
+        return True
+    import importlib.util
+
+    for name in ("hindsight_client", "hindsight"):
+        try:
+            if importlib.util.find_spec(name) is not None:
+                return True
+        except (ImportError, ValueError):
+            continue
+    return False
+
+
+def _ensure_client_dependency() -> None:
+    """Fail with advice instead of a bare ModuleNotFoundError when the SDK is absent.
+
+    PM owns dependency installation: this plugin declares its requirements in
+    ``plugin.yaml`` and PM installs them when the plugin is admitted, so runtime
+    code never installs (``hermes pm repair`` restores an environment that lost
+    them). Nothing here downloads anything.
+    """
+    if _client_importable():
         return
-    try:
-        from tools.lazy_deps import ensure as _lazy_ensure
-        _lazy_ensure("memory.hindsight", prompt=False)
-    except ImportError:
-        pass
-    except Exception as exc:
-        raise ImportError(str(exc)) from exc
+    raise ImportError(
+        "The Hindsight client is not installed in this environment (declared dependency "
+        "'hindsight-client>=0.6.1'). Run `hermes pm repair`, then restart Hermes."
+    )
 
 
 def _scoped_setting(name: str, default: str = "") -> str:
@@ -133,27 +154,25 @@ def _cloud_api_key(config: dict) -> str:
 
 
 def _maybe_upgrade_client() -> None:
-    """Auto-upgrade an outdated hindsight-client via the environment-aware lazy_deps
-    installer (sealed hosted venvs redirect to the durable target)."""
+    """Warn when the installed client is older than the version this plugin needs.
+
+    PM owns dependency changes: installing or upgrading packages mid-run is what
+    the retired lazy installer did, and an enabled plugin's dependencies are
+    installed by PM from its declaration (``hermes pm repair`` re-runs that).
+    So this only reports; it never installs.
+    """
     try:
         from importlib.metadata import version as pkg_version
         from packaging.version import Version
         installed = pkg_version("hindsight-client")
         if Version(installed) < Version(_MIN_CLIENT_VERSION):
-            logger.warning("hindsight-client %s is outdated (need >=%s), attempting upgrade...",
-                           installed, _MIN_CLIENT_VERSION)
-            from tools.lazy_deps import install_specs
-            outcome = install_specs([f"hindsight-client>={_MIN_CLIENT_VERSION}"], timeout=120)
-            if outcome.ok:
-                logger.info("hindsight-client upgraded to >=%s", _MIN_CLIENT_VERSION)
-            elif outcome.blocked:
-                logger.warning("Auto-upgrade unavailable: %s. Run: uv pip install 'hindsight-client>=%s'",
-                               outcome.reason, _MIN_CLIENT_VERSION)
-            else:
-                logger.warning("Auto-upgrade failed: %s. Run: uv pip install 'hindsight-client>=%s'",
-                               (outcome.stderr or "").strip() or "install error", _MIN_CLIENT_VERSION)
+            logger.warning(
+                "hindsight-client %s is outdated (need >=%s); run `hermes pm repair` "
+                "and restart Hermes, or install it with: uv pip install 'hindsight-client>=%s'",
+                installed, _MIN_CLIENT_VERSION, _MIN_CLIENT_VERSION,
+            )
     except Exception:
-        pass  # packaging not available or other issue — proceed anyway
+        pass  # packaging not available or the distribution is absent — proceed anyway
 
 
 # update_mode='append' capability (Hindsight >= 0.5.0), cached per (API URL, key fingerprint)

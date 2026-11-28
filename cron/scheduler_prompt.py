@@ -79,6 +79,16 @@ _RESPONSE_FRAME_RE = re.compile(
     rf"(?m)^{re.escape(_RESPONSE_FRAME)}(\d+)\n{re.escape(_RESPONSE_HEADING)}")
 
 
+def _job_doc_header(job_name: str, job_id: str, now_iso: str, mode: str) -> str:
+    """Common markdown header for the short-circuit run docs (no_agent / monitor)."""
+    return (
+        f"# Cron Job: {job_name}\n\n"
+        f"**Job ID:** {job_id}\n"
+        f"**Run Time:** {now_iso}\n"
+        f"**Mode:** {mode}\n"
+    )
+
+
 def _archive_answer(archive: str) -> str | None:
     """The reusable answer of a stored run, using its length frame when available.
 
@@ -296,10 +306,16 @@ _CRON_HINT = (
     "context for this run, not as a request to schedule another job.]\n\n"
 )
 
-# Number of turns the one-shot post-hard-stop diversion directive (see #720)
-# asks the agent to avoid the previously stuck tool for, at the start of the
-# next run of the same cron job.
-_HARD_STOP_DIVERSION_TURNS = 5
+
+def _run_time_line() -> str:
+    """This fire's wall-clock time in the configured zone. The system prompt is date-only (byte-stable
+    for caching), so without it a 07:00 brief can't tell itself from a 19:00 retry. Kept outside
+    ``_CRON_HINT`` and after it: the hint stays byte-stable, and cron sessions are fresh per fire."""
+    from hermes_time import safe_strftime
+    now = _hermes_now()
+    offset = now.strftime("%z")
+    zone = f" (UTC{offset[:3]}:{offset[3:]})" if offset else ""
+    return f"[CURRENT RUN TIME: {safe_strftime(now, '%A, %Y-%m-%d %H:%M %Z').strip()}{zone}]\n\n"
 
 
 def _build_job_prompt(
@@ -355,37 +371,7 @@ def _build_job_prompt(
         prompt = f"{notepad_section}{prompt}"
         has_injected_data = True
 
-    # One-shot diversion directive: if the previous run of this job was
-    # hard-stopped by the cron loop guard (see #720), steer this run away
-    # from the tool it got stuck on. The flag is cleared by the caller
-    # (_run_job_impl) once it knows the agent run is actually going ahead —
-    # NOT here, since this function can be short-circuited afterwards
-    # (CronPromptInjectionBlocked, empty script output) before any agent
-    # ever sees the directive.
-    stuck_tool = job.get("last_hard_stop_tool")
-    if stuck_tool:
-        try:
-            from agent.loop_guard import _diversion_hint
-
-            advice = _diversion_hint(stuck_tool)
-            prompt = (
-                f"[NOTE: The previous run of this cron job was stopped by the "
-                f"loop guard after getting stuck repeating `{stuck_tool}` calls "
-                f"with no progress. For at least your first {_HARD_STOP_DIVERSION_TURNS} "
-                f"turns this run, avoid `{stuck_tool}` and prefer alternatives "
-                f"(file reads, repo_map, delegating to a subagent) unless it is "
-                f"truly unavoidable."
-                f"{(' ' + advice) if advice else ''}]\n\n"
-                f"{prompt}"
-            )
-        except Exception as e:
-            logger.debug(
-                "Job '%s': failed to construct diversion directive: %s",
-                job.get("id"),
-                e,
-            )
-
-    prompt = _CRON_HINT + prompt
+    prompt = _CRON_HINT + _run_time_line() + prompt
     skill_names = _job_skill_names(job)
     if not skill_names:
         return _scan_assembled_cron_prompt(
